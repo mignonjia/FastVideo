@@ -83,7 +83,7 @@ miscellaneous_args=(
 torchrun \
   --nnodes 1 \
   --nproc_per_node $NUM_GPUS \
-    fastvideo/training/wangame_training_pipeline.py \
+    fastvideo/training/wangame_lingbot_training_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
     "${dataset_args[@]}" \

@@ -14,7 +14,7 @@ for node_id in {0..7}; do
     sbatch --job-name=mg-pre-${node_id} \
            --output=preprocess_output/mg-node-${node_id}.out \
            --error=preprocess_output/mg-node-${node_id}.err \
-           $(pwd)/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/preprocess_worker.slurm $start_file $node_id
+           $(pwd)/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v_LingBot/preprocess_worker.slurm $start_file $node_id
 done
 
 echo "All 8 nodes (64 GPUs) launched successfully!"

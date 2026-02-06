@@ -60,6 +60,62 @@ class PatchEmbed(nn.Module):
         return x
 
 
+class WanCamControlPatchEmbedding(nn.Module):
+    """Lingbot World Patch embedding for Plucker features."""
+
+    def __init__(
+        self,
+        in_chans: int,
+        embed_dim: int,
+        patch_size: tuple[int, int, int] | list[int] | int,
+        bias: bool = True,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+        if isinstance(patch_size, int):
+            patch_size = (patch_size, patch_size, patch_size)
+        elif isinstance(patch_size, (tuple, list)):
+            if len(patch_size) == 1:
+                patch_size = (patch_size[0], patch_size[0], patch_size[0])
+            elif len(patch_size) != 3:
+                raise ValueError(
+                    f"patch_size must have length 1 or 3, got {len(patch_size)}")
+        else:
+            raise TypeError(f"Unsupported patch_size type: {type(patch_size)}")
+
+        self.patch_size = tuple(patch_size)
+        pt, ph, pw = self.patch_size
+        self.in_features = in_chans * pt * ph * pw
+        self.proj = nn.Linear(self.in_features,
+                              embed_dim,
+                              bias=bias,
+                              dtype=dtype)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dim() != 5:
+            raise ValueError(
+                f"Expected camera embedding shape [B, C, F, H, W], got {x.shape}")
+        bsz, channels, frames, height, width = x.shape
+        pt, ph, pw = self.patch_size
+        if (frames % pt) != 0 or (height % ph) != 0 or (width % pw) != 0:
+            raise ValueError(
+                f"Input shape {x.shape} must be divisible by patch_size {self.patch_size}")
+
+        # '1 c (f c1) (h c2) (w c3) -> 1 (f h w) (c c1 c2 c3)',
+        x = x.view(
+            bsz,
+            channels,
+            frames // pt,
+            pt,
+            height // ph,
+            ph,
+            width // pw,
+            pw,
+        )
+        x = x.permute(0, 2, 4, 6, 1, 3, 5, 7).reshape(bsz, -1, self.in_features)
+        return self.proj(x)
+
+
 class TimestepEmbedder(nn.Module):
     """
     Embeds scalar timesteps into vector representations.

@@ -1,22 +1,28 @@
 #!/bin/bash
 
+export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=offline
 export TOKENIZERS_PARALLELISM=false
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
+export PYTHONPATH=$PYTHONPATH:$(pwd)
 
 MODEL_PATH="weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers"
-DATA_DIR="mc_wasd_10/preprocessed/combined_parquet_dataset"
-VALIDATION_DATASET_FILE="mc_wasd_10/validation.json"
-NUM_GPUS=4
+DATA_DIR="../traindata_0205_1330/data/0_static_plus_w_only/preprocessed"
+VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
+NUM_GPUS=1
 # export CUDA_VISIBLE_DEVICES=0,1,2,3
 # IP=[MASTER NODE IP]
 
+source ~/conda/miniconda/bin/activate
+conda activate /mnt/weka/home/hao.zhang/conda/miniconda/envs/mhuo-fv
+export PYTHONPATH="/mnt/weka/home/hao.zhang/kaiqin/FastVideo:$PYTHONPATH"
+
 # Training arguments
 training_args=(
-  --tracker_project_name "wangame_1.3b_overfit"
-  --output_dir "wangame_1.3b_overfit"
-  --max_train_steps 1500
+  --tracker_project_name "wangame_lingbot_test"
+  --output_dir "wangame_lingbot_test"
+  --max_train_steps 100
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1

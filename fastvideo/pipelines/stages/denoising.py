@@ -28,6 +28,9 @@ from fastvideo.pipelines.stages.validators import VerificationResult
 from fastvideo.platforms import AttentionBackendEnum
 from fastvideo.utils import dict_to_3d_list, masks_like
 
+from fastvideo.profiler import get_or_create_profiler
+import fastvideo.envs as envs
+
 try:
     from fastvideo.attention.backends.sliding_tile_attn import (
         SlidingTileAttentionBackend)

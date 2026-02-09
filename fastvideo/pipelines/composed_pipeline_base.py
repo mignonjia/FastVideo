@@ -19,7 +19,8 @@ from fastvideo.distributed.communication_op import (
     warmup_sequence_parallel_communication)
 from fastvideo.fastvideo_args import FastVideoArgs, TrainingArgs
 from fastvideo.logger import init_logger
-from fastvideo.profiler import get_or_create_profiler
+# from fastvideo.profiler import get_or_create_profiler
+from fastvideo.profiler import get_global_controller
 from fastvideo.models.loader.component_loader import PipelineComponentLoader
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch
 from fastvideo.pipelines.stages import PipelineStage
@@ -78,16 +79,17 @@ class ComposedPipelineBase(ABC):
 
         # Torch profiler. Enabled and configured through env vars:
         # FASTVIDEO_TORCH_PROFILER_DIR=/path/to/save/trace
-        trace_dir = envs.FASTVIDEO_TORCH_PROFILER_DIR
-        self.profiler_controller = get_or_create_profiler(trace_dir)
-        self.profiler = self.profiler_controller.profiler
+        # trace_dir = envs.FASTVIDEO_TORCH_PROFILER_DIR
+        # self.profiler_controller = get_or_create_profiler(trace_dir)
+        # self.profiler = self.profiler_controller.profiler
 
         self.local_rank = get_world_group().local_rank
 
         # Load modules directly in initialization
         logger.info("Loading pipeline modules...")
-        with self.profiler_controller.region("profiler_region_model_loading"):
-            self.modules = self.load_modules(fastvideo_args, loaded_modules)
+        # with self.profiler_controller.region("profiler_region_model_loading"):
+        #     self.modules = self.load_modules(fastvideo_args, loaded_modules)
+        self.modules = self.load_modules(fastvideo_args, loaded_modules)
 
     def set_trainable(self) -> None:
         # Only train DiT
@@ -427,17 +429,17 @@ class ComposedPipelineBase(ABC):
         self._stage_name_mapping[stage_name] = stage
         setattr(self, stage_name, stage)
 
-    def profile(self, is_start: bool = True):
-        if self.profiler is None:
-            raise RuntimeError("Profiler is not enabled.")
-        if is_start:
-            self.profiler.start()
-        else:
-            self.profiler.stop()
-            # only print profiler results on rank 0
-            if self.local_rank == 0:
-                print(self.profiler.key_averages().table(
-                    sort_by="self_cuda_time_total"))
+    # def profile(self, is_start: bool = True):
+    #     if self.profiler is None:
+    #         raise RuntimeError("Profiler is not enabled.")
+    #     if is_start:
+    #         self.profiler.start()
+    #     else:
+    #         self.profiler.stop()
+    #         # only print profiler results on rank 0
+    #         if self.local_rank == 0:
+    #             print(self.profiler.key_averages().table(
+    #                 sort_by="self_cuda_time_total"))
 
     # TODO(will): don't hardcode no_grad
     @torch.no_grad()

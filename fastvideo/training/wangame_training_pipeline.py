@@ -17,6 +17,7 @@ from fastvideo.models.schedulers.scheduling_flow_unipc_multistep import (
 from fastvideo.pipelines.basic.wan.wangame_i2v_pipeline import WanGameActionImageToVideoPipeline
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
 from fastvideo.training.training_pipeline import TrainingPipeline
+from fastvideo.training.training_utils import count_trainable, count_trainable_total
 from fastvideo.utils import is_vsa_available, shallow_asdict
 
 vsa_available = is_vsa_available()
@@ -114,9 +115,18 @@ class WanGameTrainingPipeline(TrainingPipeline):
             if step == 1:
                 # Freeze action params at the very first step
                 self._set_action_params_grad(False)
+                local_trainable = count_trainable(self.transformer)
+                total_trainable = count_trainable_total(
+                    self.transformer, get_local_torch_device()
+                )
                 logger.info(
                     "Action warmup: freezing action modules for the first "
                     "%d steps to stabilize base model", warmup_steps)
+                logger.info(
+                    "Trainable during warmup: %s B (total); this rank shard: %s B",
+                    round(total_trainable / 1e9, 3),
+                    round(local_trainable / 1e9, 3),
+                )
             elif step == warmup_steps + 1:
                 # Unfreeze action params once warmup is done
                 self._set_action_params_grad(True)
@@ -147,6 +157,8 @@ class WanGameTrainingPipeline(TrainingPipeline):
         if batch is None:
             self.current_epoch += 1
             logger.info("Starting epoch %s", self.current_epoch)
+            # Reshuffle dataset order each epoch
+            self.train_dataset.sampler.set_epoch(self.current_epoch)
             # Reset iterator for next epoch
             self.train_loader_iter = iter(self.train_dataloader)
             # Get first batch of new epoch

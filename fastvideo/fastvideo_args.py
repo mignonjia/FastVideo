@@ -10,7 +10,7 @@ from enum import Enum
 from typing import Any, TYPE_CHECKING
 
 from fastvideo.configs.configs import PreprocessConfig
-from fastvideo.configs.pipelines.base import PipelineConfig, STA_Mode
+from fastvideo.configs.pipelines.base import PipelineConfig
 from fastvideo.configs.utils import clean_cli_args
 from fastvideo.layers.quantization import QUANTIZATION_METHODS, QuantizationMethods
 from fastvideo.logger import init_logger
@@ -141,8 +141,6 @@ class FastVideoArgs:
 
     # STA (Sliding Tile Attention) parameters
     mask_strategy_file_path: str | None = None
-    STA_mode: STA_Mode = STA_Mode.STA_INFERENCE
-    skip_time_steps: int = 15
 
     # Compilation
     enable_torch_compile: bool = False
@@ -179,6 +177,7 @@ class FastVideoArgs:
     model_loaded: dict[str, bool] = field(default_factory=lambda: {
         "transformer": True,
         "vae": True,
+        "upsampler": True,
     })
 
     override_text_encoder_safetensors: str | None = None  # path to safetensors file for text encoder override
@@ -464,20 +463,6 @@ class FastVideoArgs:
         )
 
         # STA (Sliding Tile Attention) parameters
-        parser.add_argument(
-            "--STA-mode",
-            type=str,
-            default=FastVideoArgs.STA_mode.value,
-            choices=[mode.value for mode in STA_Mode],
-            help=
-            "STA mode contains STA_inference, STA_searching, STA_tuning, STA_tuning_cfg, None",
-        )
-        parser.add_argument(
-            "--skip-time-steps",
-            type=int,
-            default=FastVideoArgs.skip_time_steps,
-            help="Number of time steps to warmup (full attention) for STA",
-        )
         parser.add_argument(
             "--mask-strategy-file-path",
             type=str,
@@ -831,6 +816,7 @@ class TrainingArgs(FastVideoArgs):
     """
     data_path: str = ""
     dataloader_num_workers: int = 0
+    reshuffle_each_epoch: bool = True
     num_height: int = 0
     num_width: int = 0
     num_frames: int = 0
@@ -919,6 +905,7 @@ class TrainingArgs(FastVideoArgs):
     lora_rank: int | None = None
     lora_alpha: int | None = None
     lora_training: bool = False
+    ltx2_first_frame_conditioning_p: float = 0.1
 
     # Action-only training (freeze base model, only train action params)
     train_action_only: bool = False
@@ -939,6 +926,7 @@ class TrainingArgs(FastVideoArgs):
     training_state_checkpointing_steps: int = 0  # for resuming training
     weight_only_checkpointing_steps: int = 0  # for inference
     log_visualization: bool = False
+    visualization_steps: int = 0
     # simulate generator forward to match inference
     simulate_generator_forward: bool = False
     warp_denoising_step: bool = False
@@ -1005,11 +993,15 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--data-path",
                             type=str,
                             required=True,
-                            help="Path to parquet files")
+                            help="Path to parquet files (comma-separated for multiple; path:N for repeat count)")
         parser.add_argument("--dataloader-num-workers",
                             type=int,
                             required=True,
                             help="Number of workers for dataloader")
+        parser.add_argument("--reshuffle-each-epoch",
+                            action=StoreBoolean,
+                            default=TrainingArgs.reshuffle_each_epoch,
+                            help="Whether to reshuffle dataset order each epoch")
         parser.add_argument("--num-height",
                             type=int,
                             required=True,
@@ -1105,6 +1097,9 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--log-validation",
                             action=StoreBoolean,
                             help="Whether to log validation results")
+        parser.add_argument("--visualization-steps",
+                            type=int,
+                            help="Number of visualization steps")
         parser.add_argument("--tracker-project-name",
                             type=str,
                             help="Project name for tracking")
@@ -1279,6 +1274,13 @@ class TrainingArgs(FastVideoArgs):
                             help="Whether to use LoRA training")
         parser.add_argument("--lora-rank", type=int, help="LoRA rank")
         parser.add_argument("--lora-alpha", type=int, help="LoRA alpha")
+        parser.add_argument(
+            "--ltx2-first-frame-conditioning-p",
+            type=float,
+            default=TrainingArgs.ltx2_first_frame_conditioning_p,
+            help=
+            "Probability of conditioning on the first frame during LTX-2 training",
+        )
 
         # Action-only training (freeze base model, only train action params)
         parser.add_argument("--train-action-only",

@@ -65,11 +65,12 @@ class WanCamControlPatchEmbedding(nn.Module):
 
     def __init__(
         self,
-        in_chans: int,
-        embed_dim: int,
-        patch_size: tuple[int, int, int] | list[int] | int,
-        bias: bool = True,
-        dtype: torch.dtype | None = None,
+        patch_size=(1, 2, 2),
+        in_chans=384,  # 6 * 64
+        embed_dim=2048,
+        bias=True,
+        dtype=None,
+        prefix: str = ""
     ) -> None:
         super().__init__()
         if isinstance(patch_size, int):

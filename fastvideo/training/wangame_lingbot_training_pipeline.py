@@ -65,6 +65,7 @@ class WanLingBotTrainingPipeline(TrainingPipeline):
         action_param_patterns = [
             "patch_embedding_wancamctrl",
             "cam_conditioner",
+            "c2ws_mlp",
         ]
         
         # Enable gradients for action-related parameters only
@@ -90,6 +91,7 @@ class WanLingBotTrainingPipeline(TrainingPipeline):
     _ACTION_PARAM_PATTERNS = [
         "patch_embedding_wancamctrl",
         "cam_conditioner",
+        "c2ws_mlp",
     ]
 
     def _set_action_params_grad(self, requires_grad: bool) -> None:

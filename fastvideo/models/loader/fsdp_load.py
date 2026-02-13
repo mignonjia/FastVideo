@@ -350,6 +350,7 @@ def load_model_from_full_model_state_dict(
         "action_embedder",
         "patch_embedding_wancamctrl",
         "cam_conditioner",
+        "c2ws_mlp",
     ]  # Can be extended as needed
     
     # Patterns for params that need kaiming_uniform init (input projections need non-zero for gradient flow)

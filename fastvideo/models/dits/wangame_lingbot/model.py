@@ -20,6 +20,7 @@ from fastvideo.layers.visual_embedding import (PatchEmbed,
                                                WanCamControlPatchEmbedding)
 from fastvideo.logger import init_logger
 from fastvideo.models.dits.base import BaseDiT
+from fastvideo.models.dits.lingbotworld import LingBotWorldCamConditioner
 from fastvideo.models.dits.wanvideo import (WanI2VCrossAttention,
                                             WanTimeTextImageEmbedding)
 from fastvideo.platforms import AttentionBackendEnum, current_platform
@@ -28,45 +29,6 @@ from fastvideo.platforms import AttentionBackendEnum, current_platform
 logger = init_logger(__name__)
 
 
-class WanGameLingbotCamConditioner(nn.Module):
-    """Camera-control injector used by Lingbot-style Wan blocks."""
-
-    def __init__(self, dim: int) -> None:
-        super().__init__()
-        self.cam_injector_layer1 = nn.Linear(dim, dim)
-        self.cam_injector_layer2 = nn.Linear(dim, dim)
-        self.cam_scale_layer = nn.Linear(dim, dim)
-        self.cam_shift_layer = nn.Linear(dim, dim)
-        self.reset_parameters()
-
-    def reset_parameters(self) -> None:
-        nn.init.xavier_uniform_(self.cam_injector_layer1.weight)
-        nn.init.zeros_(self.cam_injector_layer1.bias)
-        nn.init.xavier_uniform_(self.cam_injector_layer2.weight)
-        nn.init.zeros_(self.cam_injector_layer2.bias)
-        nn.init.xavier_uniform_(self.cam_scale_layer.weight)
-        nn.init.zeros_(self.cam_scale_layer.bias)
-        nn.init.xavier_uniform_(self.cam_shift_layer.weight)
-        nn.init.zeros_(self.cam_shift_layer.bias)
-
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        c2ws_plucker_emb: torch.Tensor | None,
-    ) -> torch.Tensor:
-        if c2ws_plucker_emb is None:
-            return hidden_states
-        assert c2ws_plucker_emb.shape == hidden_states.shape, (
-            f"c2ws_plucker_emb shape must match hidden_states shape, got "
-            f"{tuple(c2ws_plucker_emb.shape)} vs {tuple(hidden_states.shape)}"
-        )
-        c2ws_hidden_states = self.cam_injector_layer2(
-            F.silu(self.cam_injector_layer1(c2ws_plucker_emb)))
-        c2ws_hidden_states = c2ws_hidden_states + c2ws_plucker_emb
-        cam_scale = self.cam_scale_layer(c2ws_hidden_states)
-        cam_shift = self.cam_shift_layer(c2ws_hidden_states)
-        return (1.0 + cam_scale) * hidden_states + cam_shift
-        
 class WanGameCrossAttention(WanI2VCrossAttention):
     def forward(self, x, context, context_lens=None):
         r"""
@@ -161,8 +123,7 @@ class WanGameActionTransformerBlock(nn.Module):
         self.mlp_residual = ScaleResidual()
 
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
-
-        self.cam_conditioner = WanGameLingbotCamConditioner(dim)
+        self.cam_conditioner = LingBotWorldCamConditioner(dim)
 
     def forward(
         self,
@@ -218,9 +179,12 @@ class WanGameActionTransformerBlock(nn.Module):
         norm_hidden_states, hidden_states = self.self_attn_residual_norm(
             hidden_states.float(), attn_output.float(), gate_msa, null_shift, null_scale)
         hidden_states = hidden_states.type_as(attn_output)
-        norm_hidden_states = norm_hidden_states.type_as(attn_output)
+        # norm_hidden_states = norm_hidden_states.type_as(attn_output)
+        # Inject camera condition
+        # must be applied after the self-attention residual update.
         hidden_states = self.cam_conditioner(hidden_states, c2ws_plucker_emb)
-        norm_hidden_states = norm_hidden_states.type_as(hidden_states)
+        norm_hidden_states = self.self_attn_residual_norm.norm(hidden_states)
+        norm_hidden_states = norm_hidden_states.to(orig_dtype)
 
         # 2. Cross-attention
         attn_output = self.attn2(norm_hidden_states.to(orig_dtype),
@@ -281,10 +245,9 @@ class WanLingBotTransformer3DModel(BaseDiT):
             embed_dim=inner_dim,
             patch_size=config.patch_size,
         )
-        nn.init.xavier_uniform_(self.patch_embedding_wancamctrl.proj.weight)
-        nn.init.zeros_(self.patch_embedding_wancamctrl.proj.bias)
+        self.c2ws_mlp = MLP(inner_dim, inner_dim, inner_dim, bias=True, act_type="silu")
 
-        # 2. Condition embeddings (image-only)
+        # 2. Condition embeddings
         self.condition_embedder = WanTimeTextImageEmbedding(
             dim=inner_dim,
             time_freq_dim=config.freq_dim,
@@ -399,9 +362,11 @@ class WanLingBotTransformer3DModel(BaseDiT):
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
         c2ws_hidden_states = None
         if c2ws_plucker_emb is not None:
-            c2ws_hidden_states = self.patch_embedding_wancamctrl(
+            c2ws_plucker_emb = self.patch_embedding_wancamctrl(
                 c2ws_plucker_emb.to(device=hidden_states.device,
                                     dtype=hidden_states.dtype))
+            c2ws_hidden_states = self.c2ws_mlp(c2ws_plucker_emb)
+            c2ws_plucker_emb = c2ws_plucker_emb + c2ws_hidden_states
 
         if timestep.dim() == 2:
             timestep = timestep.flatten()
@@ -435,14 +400,14 @@ class WanLingBotTransformer3DModel(BaseDiT):
                     kv_cache[block_idx] if kv_cache else None,
                     crossattn_cache[block_idx] if crossattn_cache else None,
                     current_start, cache_start,
-                    viewmats, Ks, c2ws_hidden_states, is_cache)
+                    viewmats, Ks, c2ws_plucker_emb, is_cache)
             else:
                 hidden_states = block(
                     hidden_states, encoder_hidden_states, timestep_proj, freqs_cis,
                     kv_cache[block_idx] if kv_cache else None,
                     crossattn_cache[block_idx] if crossattn_cache else None,
                     current_start, cache_start,
-                    viewmats, Ks, c2ws_hidden_states, is_cache)
+                    viewmats, Ks, c2ws_plucker_emb, is_cache)
 
         # If cache-only mode, return early
         if is_cache:

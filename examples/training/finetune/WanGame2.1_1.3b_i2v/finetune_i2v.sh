@@ -5,12 +5,16 @@ export WANDB_MODE=offline
 export TOKENIZERS_PARALLELISM=false
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 
-MODEL_PATH="weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers"
-DATA_DIR="mc_wasd_10/preprocessed/combined_parquet_dataset"
-VALIDATION_DATASET_FILE="mc_wasd_10/validation.json"
-NUM_GPUS=4
-# export CUDA_VISIBLE_DEVICES=0,1,2,3
+MODEL_PATH="./Wan2.1-Game-Fun-1.3B-InP-Diffusers"
+DATA_DIR="../FastVideo/vizdoom/data/preprocessed"
+VALIDATION_DATASET_FILE="/mnt/fast-disks/hao_lab/kaiqin/FastVideo_wangame/examples/training/finetune/WanGame2.1_1.3b_i2v_LingBot/validation.json"
+NUM_GPUS=2
+export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
+
+# source ~/conda/miniconda/bin/activate
+# conda activate /mnt/weka/home/hao.zhang/conda/miniconda/envs/mhuo-fv
+export PYTHONPATH="/mnt/weka/home/hao.zhang/kaiqin/FastVideo_wangame:$PYTHONPATH"
 
 # Training arguments
 training_args=(

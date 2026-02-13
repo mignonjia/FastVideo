@@ -150,12 +150,12 @@ class WanGameActionTransformerBlock(nn.Module):
 
         # Cast temb to float32 for scale/shift computation
         e = self.scale_shift_table + temb.float()
-        assert e.shape == (bs, num_frames, 6, self.hidden_dim)
+        assert e.shape == (bs, num_frames, 6, self.hidden_dim), f"e.shape: {e.shape}, expected: {(bs, num_frames, 6, self.hidden_dim)}"
         shift_msa, scale_msa, gate_msa, c_shift_msa, c_scale_msa, c_gate_msa = e.chunk(6, dim=2)
 
         # 1. Self-attention
-        norm_hidden_states = (self.norm1(hidden_states.float()) *
-                              (1 + scale_msa) + shift_msa).to(orig_dtype)
+        norm_hidden_states = (self.norm1(hidden_states.float()).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) *
+                              (1 + scale_msa) + shift_msa).to(orig_dtype).flatten(1, 2)
         query, _ = self.to_q(norm_hidden_states)
         key, _ = self.to_k(norm_hidden_states)
         value, _ = self.to_v(norm_hidden_states)
@@ -371,23 +371,19 @@ class WanLingBotTransformer3DModel(BaseDiT):
         if timestep.dim() == 2:
             timestep = timestep.flatten()
 
-        if encoder_hidden_states is None or (
-                isinstance(encoder_hidden_states, torch.Tensor)
-                and encoder_hidden_states.numel() == 0):
-            encoder_hidden_states = hidden_states.new_zeros((batch_size, 0, self.hidden_size))
         temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image = self.condition_embedder(
             timestep, encoder_hidden_states, encoder_hidden_states_image=encoder_hidden_states_image)
-        # Reshape timestep_proj: [T, 6*dim] -> [B, T, 6, dim]
-        # For training: batch_size=1, T=num_frames (diffusion forcing)
-        # For inference: batch_size can vary
-        timestep_proj = timestep_proj.unflatten(1, (6, self.hidden_size))
-        if timestep_proj.shape[0] == post_patch_num_frames and batch_size == 1:
-            # Training mode: timestep_proj is [T, 6, dim], add batch dim -> [1, T, 6, dim]
-            timestep_proj = timestep_proj.unsqueeze(0)
-        else:
-            # Inference mode: reshape based on timestep shape
-            timestep_proj = timestep_proj.unflatten(dim=0, sizes=timestep.shape)
-
+        
+        # Reshape and expand timestep_proj to [B, T, 6, dim]
+        timestep_proj = timestep_proj.unflatten(1, (6, self.hidden_size))  # [B, 6, dim] or [B*T, 6, dim]
+        
+        if timestep_proj.shape[0] == batch_size:
+            # Expand across T frames
+            timestep_proj = timestep_proj.unsqueeze(1).expand(-1, post_patch_num_frames, -1, -1)
+        elif timestep_proj.shape[0] == batch_size * post_patch_num_frames:
+            # Reshape
+            timestep_proj = timestep_proj.view(batch_size, post_patch_num_frames, 6, self.hidden_size)
+        
         encoder_hidden_states = encoder_hidden_states_image
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states.new_zeros((batch_size, 0, self.hidden_size))
@@ -414,13 +410,11 @@ class WanLingBotTransformer3DModel(BaseDiT):
             return kv_cache
 
         # Output norm, projection & unpatchify
-        # Reshape temb to match timestep_proj shape: [T, dim] -> [B, T, 1, dim]
-        if temb.shape[0] == post_patch_num_frames and batch_size == 1:
-            # Training mode: temb is [T, dim] -> [1, T, 1, dim]
-            temb = temb.unsqueeze(0).unsqueeze(2)
+        # Expand temb to [B, T, 1, dim]
+        if temb.shape[0] == batch_size:
+            temb = temb.unsqueeze(1).expand(-1, post_patch_num_frames, -1).unsqueeze(2)
         else:
-            # Inference mode: reshape based on timestep shape
-            temb = temb.unflatten(dim=0, sizes=timestep.shape).unsqueeze(2)
+            temb = temb.view(batch_size, post_patch_num_frames, -1).unsqueeze(2)
         
         shift, scale = (self.scale_shift_table.unsqueeze(1) + temb).chunk(2, dim=2)
         hidden_states = self.norm_out(hidden_states, shift, scale)

@@ -2,22 +2,22 @@
 
 export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
 export WANDB_BASE_URL="https://api.wandb.ai"
-# export WANDB_MODE=online
-export WANDB_MODE=offline
+export WANDB_MODE=online
+# export WANDB_MODE=offline
 export TOKENIZERS_PARALLELISM=false
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
 export PYTHONPATH=$PYTHONPATH:$(pwd)
 
-MODEL_PATH="weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers"
-DATA_DIR="../traindata_0205_1330/data/0_static_plus_w_only/preprocessed"
+MODEL_PATH="./Wan2.1-Game-Fun-1.3B-InP-Diffusers"
+DATA_DIR="vizdoom/data/preprocessed"
 VALIDATION_DATASET_FILE="$(dirname "$0")/validation.json"
-NUM_GPUS=1
-# export CUDA_VISIBLE_DEVICES=0,1,2,3
+NUM_GPUS=2
+export CUDA_VISIBLE_DEVICES=4,5
 # IP=[MASTER NODE IP]
 
-source ~/conda/miniconda/bin/activate
-conda activate /mnt/weka/home/hao.zhang/conda/miniconda/envs/mhuo-fv
-export PYTHONPATH="/mnt/weka/home/hao.zhang/kaiqin/FastVideo:$PYTHONPATH"
+# source ~/conda/miniconda/bin/activate
+# conda activate /mnt/weka/home/hao.zhang/conda/miniconda/envs/mhuo-fv
+export PYTHONPATH="/mnt/weka/home/hao.zhang/kaiqin/FastVideo_wangame:$PYTHONPATH"
 
 # Training arguments
 training_args=(
@@ -28,12 +28,13 @@ training_args=(
   --max_train_steps 100
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 1
+  --gradient_accumulation_steps 4
   --num_latent_t 20
   --num_height 352
   --num_width 640
   --num_frames 77
   --enable_gradient_checkpointing_type "full"
+  --train_action_only True
 )
 
 # Parallel arguments
@@ -61,7 +62,7 @@ dataset_args=(
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 100
+  --validation_steps 50
   --validation_sampling_steps "40"
   --validation_guidance_scale "1.0"
 )

@@ -354,7 +354,7 @@ def load_model_from_full_model_state_dict(
     ]  # Can be extended as needed
     
     # Patterns for params that need kaiming_uniform init (input projections need non-zero for gradient flow)
-    KAIMING_INIT_PATTERNS = ["fc_in.weight"]
+    KAIMING_INIT_PATTERNS = ["fc_in.weight", "patch_embedding_wancamctrl.proj.weight"]
     
     for new_param_name in unused_keys:
         if not any(pattern in new_param_name

@@ -44,7 +44,7 @@ def _reformat_keyboard_and_mouse_cond(
 def _motions_to_c2ws(
     keyboard_cond: torch.Tensor,
     mouse_cond: torch.Tensor,
-    forward_speed: float = 0.08,  # from HYW
+    forward_speed: float = 3.0,
 ) -> torch.Tensor:
     n_steps = keyboard_cond.shape[0]
     poses = []
@@ -98,7 +98,7 @@ def process_custom_actions(
     width_org: int = 832,
     spatial_scale: int = 8,
     intrinsics: torch.Tensor | None = None,
-    forward_speed: float = 0.08,  # from HYW
+    forward_speed: float = 3.0,
     normalize_trans: bool = True,
 ) -> torch.Tensor:
     """

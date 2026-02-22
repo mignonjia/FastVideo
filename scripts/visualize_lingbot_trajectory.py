@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import torch
 
 
 def load_npy(path: str) -> np.ndarray:
@@ -34,40 +35,45 @@ def load_action_from_npy(action_path: str) -> tuple[np.ndarray, np.ndarray]:
 
 def _reformat_keyboard_and_mouse_cond(
     num_frames: int,
-    keyboard_cond: np.ndarray,
-    mouse_cond: np.ndarray,
+    keyboard_cond: torch.Tensor,
+    mouse_cond: torch.Tensor,
     compression_ratio: int = 4,
-) -> tuple[np.ndarray, np.ndarray]:
-    if keyboard_cond.shape[0] != num_frames or mouse_cond.shape[0] != num_frames:
-        raise ValueError(
-            "keyboard_cond/mouse_cond frame count must match num_frames. "
-            f"Got keyboard={keyboard_cond.shape}, mouse={mouse_cond.shape}, "
-            f"num_frames={num_frames}"
-        )
-    if (num_frames - 1) % compression_ratio != 0:
-        raise ValueError(
-            f"num_frames must satisfy (num_frames - 1) % {compression_ratio} == 0."
-        )
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Convert frame-level controls to latent-level controls."""
 
+    # keyboard / mouse shape: [T, C]
+    assert keyboard_cond.shape[0] == num_frames and mouse_cond.shape[0] == num_frames, (
+        "keyboard_cond and mouse_cond must have the same number of frames as num_frames, "
+        f"num_frames: {num_frames} "
+        f"got keyboard_cond shape: {keyboard_cond.shape}, mouse_cond shape: {mouse_cond.shape}"
+    )
+    assert (num_frames - 1) % compression_ratio == 0, (
+        f"num_frames must satisfy (num_frames - 1) % {compression_ratio} == 0, "
+        f"got {num_frames}"
+    )
     keyboard_cond = keyboard_cond[1:, :]
     mouse_cond = mouse_cond[1:, :]
-    groups_k = keyboard_cond.reshape(-1, compression_ratio, keyboard_cond.shape[1])
-    groups_m = mouse_cond.reshape(-1, compression_ratio, mouse_cond.shape[1])
-    if not np.all(groups_k == groups_k[:, :1]):
-        raise ValueError("keyboard must be constant inside each 4-frame group.")
-    if not np.all(groups_m == groups_m[:, :1]):
-        raise ValueError("mouse must be constant inside each 4-frame group.")
+
+    groups = keyboard_cond.view(-1, compression_ratio, keyboard_cond.shape[1])
+    assert (groups == groups[:, 0:1]).all(dim=1).all(), (
+        "keyboard_tensor must be constant within each compression group"
+    )
+    groups = mouse_cond.view(-1, compression_ratio, mouse_cond.shape[1])
+    assert (groups == groups[:, 0:1]).all(dim=1).all(), (
+        "mouse_tensor must be constant within each compression group"
+    )
     return keyboard_cond[::compression_ratio], mouse_cond[::compression_ratio]
 
 
 def _motions_to_c2ws(
-    keyboard_cond: np.ndarray,
-    mouse_cond: np.ndarray,
+    keyboard_cond: torch.Tensor,
+    mouse_cond: torch.Tensor,
     forward_speed: float = 3.0,
-) -> np.ndarray:
+) -> torch.Tensor:
     n_steps = keyboard_cond.shape[0]
-    pose = np.eye(4, dtype=np.float32)
-    poses = [pose.copy()]
+    poses = []
+    pose = torch.eye(4, dtype=torch.float32)
+    poses.append(pose.clone())
 
     for t in range(n_steps):
         forward = 0.0
@@ -81,24 +87,28 @@ def _motions_to_c2ws(
         if keyboard_cond[t, 3] > 0.9:  # D
             right += forward_speed
 
-        pitch = float(mouse_cond[t, 0])
-        yaw = float(mouse_cond[t, 1])
-        cp, sp = np.cos(pitch), np.sin(pitch)
-        cy, sy = np.cos(yaw), np.sin(yaw)
-        r_pitch = np.array(
-            [[1.0, 0.0, 0.0], [0.0, cp, -sp], [0.0, sp, cp]], dtype=np.float32
+        pitch = float(mouse_cond[t, 0].item())
+        yaw = float(mouse_cond[t, 1].item())
+
+        cp = np.cos(pitch)
+        sp = np.sin(pitch)
+        cy = np.cos(yaw)
+        sy = np.sin(yaw)
+        r_pitch = torch.tensor(
+            [[1.0, 0.0, 0.0], [0.0, cp, -sp], [0.0, sp, cp]], dtype=torch.float32
         )
-        r_yaw = np.array(
-            [[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]], dtype=np.float32
+        r_yaw = torch.tensor(
+            [[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]], dtype=torch.float32
         )
         r_delta = r_yaw @ r_pitch
 
-        delta = np.eye(4, dtype=np.float32)
+        delta = torch.eye(4, dtype=torch.float32)
         delta[:3, :3] = r_delta
-        delta[:3, 3] = np.array([right, 0.0, forward], dtype=np.float32)
+        delta[:3, 3] = torch.tensor([right, 0.0, forward], dtype=torch.float32)
         pose = pose @ delta
-        poses.append(pose.copy())
-    return np.stack(poses, axis=0)
+        poses.append(pose.clone())
+
+    return torch.stack(poses, dim=0)
 
 
 def action_to_c2ws(
@@ -113,16 +123,21 @@ def action_to_c2ws(
         raise ValueError("keyboard must have at least 4 dims for W/S/A/D.")
     if mouse.shape[1] != 2:
         raise ValueError("mouse must be [T,2] as [pitch,yaw].")
+    
+    keyboard_t = torch.from_numpy(keyboard)
+    mouse_t = torch.from_numpy(mouse)
+    
     keyboard_lat, mouse_lat = _reformat_keyboard_and_mouse_cond(
         num_frames=num_frames,
-        keyboard_cond=keyboard,
-        mouse_cond=mouse,
+        keyboard_cond=keyboard_t,
+        mouse_cond=mouse_t,
     )
-    return _motions_to_c2ws(
+    c2ws_t = _motions_to_c2ws(
         keyboard_cond=keyboard_lat,
         mouse_cond=mouse_lat,
         forward_speed=forward_speed,
     )
+    return c2ws_t.numpy()
 
 
 def camera_centers(c2ws: np.ndarray) -> np.ndarray:
@@ -282,78 +297,6 @@ def make_landmarks(y_offset: float = 0.0, landmark_count: int = 80):
     return meshes
 
 
-def text_to_lineset_3d(text: str, pose: np.ndarray, scale: float = 0.05,
-                       hud_depth: float = 0.5, hud_x: float = 0.25, hud_y: float = 0.2,
-                       color=[1.0, 0.9, 0.1]):
-    import open3d as o3d
-    # Segments for 0-9, S, and .
-    base_verts = np.array([[0,2], [1,2], [1,1], [0,1], [1,0], [0,0]], dtype=float)
-    segs = [[0,1], [1,2], [2,4], [4,5], [5,3], [3,0], [3,2]]
-    
-    char_map = {
-        '0': [0,1,2,3,4,5], '1': [1,2], '2': [0,1,6,4,3], '3': [0,1,6,2,3],
-        '4': [5,6,1,2], '5': [0,5,6,2,3], '6': [0,5,4,3,2,6], '7': [0,1,2],
-        '8': [0,1,2,3,4,5,6], '9': [0,1,2,3,5,6], 'S': [0,5,6,2,3], 's': [0,5,6,2,3],
-        '.': [], ' ': []
-    }
-    
-    points_2d = []
-    lines_2d = []
-    offset_x = 0.0
-    
-    for c in text:
-        if c == '.':
-            idx = len(points_2d)
-            points_2d.extend([[offset_x+0.2, 0.0], [offset_x+0.4, 0.0], [offset_x+0.4, 0.2], [offset_x+0.2, 0.2]])
-            lines_2d.extend([[idx, idx+1], [idx+1, idx+2], [idx+2, idx+3], [idx+3, idx]])
-            offset_x += 0.6
-            continue
-            
-        c = c if c in char_map else ' '
-        idx = len(points_2d)
-        
-        pts = base_verts.copy()
-        pts[:, 0] += offset_x
-        points_2d.extend(pts.tolist())
-        
-        for s_idx in char_map[c]:
-            lines_2d.append([idx + segs[s_idx][0], idx + segs[s_idx][1]])
-            
-        offset_x += 1.4
-
-    if not points_2d:
-        return o3d.geometry.LineSet()
-
-    # Align the text so its center/top-right is correctly placed in HUD
-    # We want text to grow rightwards, let's translate it
-    points_2d = np.array(points_2d, dtype=np.float32)
-    
-    # Open3D coordinate system: +X is Right, +Y is Up, +Z is Backward (out of screen)
-    # However, Lingbot/OpenCV camera poses have +Y Down, +Z Forward.
-    # When establishing local points for HUD, we map them onto the camera axes.
-    # R = pose[:3, :3] where columns are [Right, Down, Forward]
-    # Local HUD offset:
-    # +hud_x goes along camera's right
-    # +hud_y goes along camera's "Down" (but we want it at the Top of the screen, so negative Y)
-    # +hud_depth goes along camera's "Forward" (+Z)
-    local_points = np.zeros((len(points_2d), 3), dtype=np.float32)
-    # in OpenCV coords: +X is right, +Y is down, +Z is forward
-    local_points[:, 0] = hud_x + points_2d[:, 0] * scale
-    local_points[:, 1] = hud_y + points_2d[:, 1] * scale # Positive Y makes it go down. To be top right, keep Y small, and grow down.
-    local_points[:, 2] = hud_depth # Forward
-    
-    # Transform to world space using camera pose
-    R = pose[:3, :3]
-    t = pose[:3, 3]
-    world_points = (R @ local_points.T).T + t
-    
-    ls = o3d.geometry.LineSet()
-    ls.points = o3d.utility.Vector3dVector(world_points.astype(np.float64))
-    ls.lines = o3d.utility.Vector2iVector(lines_2d)
-    ls.colors = o3d.utility.Vector3dVector(np.tile(color, (len(lines_2d), 1)))
-    return ls
-
-
 def build_scene(
     gt_c2ws: np.ndarray | None,
     pred_c2ws: np.ndarray | None,
@@ -366,9 +309,9 @@ def build_scene(
 ):
     import open3d as o3d
 
-    # Move the floor and objects down by 50.0 units (+Y is down)
-    geoms = [make_ground_grid(y=50.0), o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2)]
-    geoms.extend(make_landmarks(y_offset=50.0, landmark_count=landmark_count))
+    # Move the floor and objects down by 20.0 units (+Y is down)
+    geoms = [make_ground_grid(y=20.0), o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2)]
+    geoms.extend(make_landmarks(y_offset=20.0, landmark_count=landmark_count))
 
     if gt_c2ws is not None:
         gt_pts = camera_centers(gt_c2ws)
@@ -385,6 +328,14 @@ def build_scene(
 
     if pred_c2ws is not None:
         pred_pts = camera_centers(pred_c2ws)
+        
+        # Add a tall thin marker at action mode camera initial position
+        marker = o3d.geometry.TriangleMesh.create_box(width=0.05, height=100.0, depth=0.05)
+        marker.compute_vertex_normals()
+        marker.paint_uniform_color([0.9, 0.1, 0.1]) # Red marker
+        marker.translate([pred_pts[0][0] - 0.025, pred_pts[0][1] - 20.0, pred_pts[0][2] - 0.025])
+        geoms.append(marker)
+        
         geoms.append(make_path_lines(pred_pts, [0.0, 0.9, 0.9]))
         n = min(len(pred_c2ws), len(intrinsics))
         for i in range(0, n, max(1, axis_stride)):
@@ -422,24 +373,24 @@ def play_first_person(
         vis.add_geometry(g)
 
     ctr = vis.get_view_control()
+    cam_params = ctr.convert_to_pinhole_camera_parameters()
     dt = 1.0 / max(1.0, fps)
     next_tick = time.perf_counter()
 
     for i in range(len(c2ws)):
         pose = c2ws[i]
-        pos = pose[:3, 3]
-        forward = pose[:3, 2]
-        up = -pose[:3, 1]
-        
-        # In LingBot c2ws: +Z is forward, but standard Open3D lookat logic works backward.
-        # Check LingBot code: forward = c2ws[:3, 2].
-        # Normally OpenCV camera is +Z is forward, +Y is down.
-        # This dataset uses Y as down, so up is -pose[:3, 1].
-        
-        ctr.set_lookat((pos + forward * 0.7).astype(np.float64))
-        ctr.set_front((-forward).astype(np.float64))
-        ctr.set_up(up.astype(np.float64))
-        ctr.set_zoom(0.45) # Keep a decent FOV
+        r_wc = pose[:3, :3]
+        t_wc = pose[:3, 3]
+        r_cw = r_wc.T
+        t_cw = -r_cw @ t_wc
+
+        # Open3D camera extrinsic expects world->camera.
+        ext = np.eye(4, dtype=np.float64)
+        ext[:3, :3] = r_cw.astype(np.float64)
+        ext[:3, 3] = t_cw.astype(np.float64)
+
+        cam_params.extrinsic = ext
+        ctr.convert_from_pinhole_camera_parameters(cam_params, allow_arbitrary=True)
         
         vis.poll_events()
         vis.update_renderer()

@@ -718,7 +718,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     pass
 
                 self.tracker.log(metrics, step)
-            if step % self.training_args.training_state_checkpointing_steps == 0:
+            if (step >= self.training_args.best_checkpoint_start_step
+                    and step %
+                    self.training_args.training_state_checkpointing_steps == 0):
                 with self.profiler_controller.region(
                         "profiler_region_training_save_checkpoint"):
                     save_checkpoint(self.transformer, self.global_rank,
@@ -780,6 +782,25 @@ class TrainingPipeline(LoRAPipeline, ABC):
                                 self._best_mf_angle_err_mean,
                             "best/step": step,
                         }, step)
+                    self.transformer.train()
+                    self.sp_group.barrier()
+
+                threshold = (
+                    self.training_args.best_checkpoint_save_all_threshold)
+                if (threshold > 0
+                        and best_start > 0
+                        and step >= best_start
+                        and self._last_mf_angle_err_mean < threshold):
+                    logger.info(
+                        "mf_angle_err_mean=%.6f < threshold %.1f at "
+                        "step %d, saving checkpoint",
+                        self._last_mf_angle_err_mean, threshold, step)
+                    save_checkpoint(
+                        self.transformer, self.global_rank,
+                        self.training_args.output_dir, step,
+                        self.optimizer, self.train_dataloader,
+                        self.lr_scheduler,
+                        self.noise_random_generator)
                     self.transformer.train()
                     self.sp_group.barrier()
 

@@ -94,6 +94,7 @@ training_args=(
   --enable_gradient_checkpointing_type "full"
   --train_action_only $FREEZE_DIT
   --action_warmup_steps $ACTION_WARMUP_STEPS
+  # --resume_from_checkpoint $RESUME_FROM_CHECKPOINT
   # --init_weights_from_safetensors $CKPT_SAFETENSOR
 )
 
@@ -134,6 +135,7 @@ optimizer_args=(
   --mixed_precision "bf16"
   --weight_only_checkpointing_steps 100000
   --training_state_checkpointing_steps $CHECKPOINTING_STEPS
+  --best_checkpoint_start_step $BEST_CHECKPOINT_START_STEP
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )

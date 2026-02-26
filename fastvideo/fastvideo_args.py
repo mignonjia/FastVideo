@@ -932,6 +932,7 @@ class TrainingArgs(FastVideoArgs):
     training_state_checkpointing_steps: int = 0  # for resuming training
     weight_only_checkpointing_steps: int = 0  # for inference
     best_checkpoint_start_step: int = 0  # save best checkpoint (by mf_angle_err_mean) after this step; 0 = disabled
+    best_checkpoint_save_all_threshold: float = 0.0  # also save every checkpoint where metric < this value; 0 = disabled
     log_visualization: bool = False
     visualization_steps: int = 0
     # simulate generator forward to match inference
@@ -1140,6 +1141,11 @@ class TrainingArgs(FastVideoArgs):
             type=int,
             help="Save best checkpoint (by mf_angle_err_mean) after this "
             "step; 0 = disabled")
+        parser.add_argument(
+            "--best-checkpoint-save-all-threshold",
+            type=float,
+            help="Save a checkpoint every time the metric is below "
+            "this value; 0 = disabled")
         parser.add_argument("--resume-from-checkpoint",
                             type=str,
                             help="Path to checkpoint to resume from")
@@ -1193,6 +1199,7 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--fsdp-sharding-strategy",
                             type=str,
                             help="FSDP sharding strategy")
+        
 
         parser.add_argument(
             "--weighting_scheme",

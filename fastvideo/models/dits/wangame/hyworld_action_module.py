@@ -18,10 +18,12 @@ class WanGameActionTimeImageEmbedding(nn.Module):
         self,
         dim: int,
         time_freq_dim: int,
+        text_embed_dim: int,
         image_embed_dim: int | None = None,
     ):
         super().__init__()
 
+        self.dim = dim
         self.time_freq_dim = time_freq_dim
         self.time_embedder = TimestepEmbedder(
             dim, frequency_embedding_size=time_freq_dim, act_layer="silu")
@@ -32,6 +34,12 @@ class WanGameActionTimeImageEmbedding(nn.Module):
         self.image_embedder = None
         if image_embed_dim is not None:
             self.image_embedder = WanImageEmbedding(image_embed_dim, dim)
+
+        self.text_embedder = MLP(text_embed_dim,
+                                 dim,
+                                 dim,
+                                 bias=True,
+                                 act_type="gelu_pytorch_tanh") if text_embed_dim > 0 else None
 
         self.action_embedder = MLP(
             time_freq_dim,
@@ -51,7 +59,7 @@ class WanGameActionTimeImageEmbedding(nn.Module):
         self,
         timestep: torch.Tensor,
         action: torch.Tensor,
-        encoder_hidden_states: torch.Tensor, # Kept for interface compatibility
+        encoder_hidden_states: torch.Tensor,
         encoder_hidden_states_image: torch.Tensor | None = None,
         timestep_seq_len: int | None = None,
     ):
@@ -59,10 +67,13 @@ class WanGameActionTimeImageEmbedding(nn.Module):
         Args:
             timestep: [B] diffusion timesteps (one per batch sample)
             action: [B, T] action labels (one per frame per batch sample)
-        
+            encoder_hidden_states: [B, L, D] text embeddings        
+
         Returns:
             temb: [B*T, dim] combined timestep + action embedding
             timestep_proj: [B*T, 6*dim] modulation projection
+            encoder_hidden_states: [B, L, dim] processed text embeddings
+            encoder_hidden_states_image: [B, L_img, dim] processed image embeddings
         """
         # timestep: [B] -> temb: [B, dim]
         temb = self.time_embedder(timestep, timestep_seq_len)
@@ -95,14 +106,17 @@ class WanGameActionTimeImageEmbedding(nn.Module):
 
         # MatrixGame does not use text embeddings, so we ignore encoder_hidden_states
         
+        if self.text_embedder is not None and encoder_hidden_states is not None:
+            encoder_hidden_states = self.text_embedder(encoder_hidden_states)
+        else:
+            encoder_hidden_states = torch.zeros((batch_size, 0, temb.shape[-1]),
+                                                device=temb.device,
+                                                dtype=temb.dtype)
+
         if encoder_hidden_states_image is not None:
             assert self.image_embedder is not None
             encoder_hidden_states_image = self.image_embedder(
                 encoder_hidden_states_image)
-
-        encoder_hidden_states = torch.zeros((batch_size, 0, temb.shape[-1]),
-                                            device=temb.device,
-                                            dtype=temb.dtype)
 
         return temb, timestep_proj, encoder_hidden_states, encoder_hidden_states_image
 

@@ -20,6 +20,7 @@ from einops import rearrange
 from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm.auto import tqdm
+from diffusers import FlowMatchEulerDiscreteScheduler
 
 import fastvideo.envs as envs
 try:
@@ -455,26 +456,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
             # make sure no implicit broadcasting happens
             assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
 
-            # Defensive: avoid NaNs/div0 if an upstream bug ever produces empty tensors.
-            # mean(empty) -> NaN; division by 0 -> inf/NaN. Keep a 0 loss with grad history.
-            if model_pred.numel() == 0:
-                loss = (model_pred.sum() *
-                        0.0) / self.training_args.gradient_accumulation_steps
-            else:
-                # Compute MSE on one SP shard. We shard along the flattened token axis
-                # (t*h*w) with optional padding so (t*h*w) need not be divisible by sp_size.
-                sp_world_size = get_sp_group().world_size
-                if sp_world_size > 1:
-                    sharded_pred = shard_latents_across_sp(model_pred)
-                    sharded_target = shard_latents_across_sp(target)
-                    local_sse = ((sharded_pred.float() -
-                                  sharded_target.float())**2).sum()
-                    loss = (sp_world_size * local_sse / model_pred.numel()
-                            ) / self.training_args.gradient_accumulation_steps
-                else:
-                    loss = (torch.mean(
-                        (model_pred.float() - target.float())**2) /
-                            self.training_args.gradient_accumulation_steps)
+            loss = (torch.mean((model_pred.float() - target.float())**2) /
+                    self.training_args.gradient_accumulation_steps)
 
             loss.backward()
 
@@ -622,8 +605,6 @@ class TrainingPipeline(LoRAPipeline, ABC):
         self.validation_random_generator = torch.Generator(
             device="cpu").manual_seed(self.seed)
         logger.info("Initialized random seeds with seed: %s", self.seed)
-
-        self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
@@ -945,6 +926,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
             step_videos: list[np.ndarray] = []
             step_captions: list[str] = []
             step_action_paths: list[str | None] = []
+            step_audio: list[np.ndarray | None] = []
+            step_sample_rates: list[int | None] = []
 
             for validation_batch in validation_dataloader:
                 batch = self._prepare_validation_batch(sampling_param,
@@ -969,6 +952,16 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     batch, training_args)
                 samples = output_batch.output.cpu()
 
+                # Capture audio if available
+                audio = output_batch.extra.get("audio")
+                sample_rate = output_batch.extra.get("audio_sample_rate")
+
+                if audio is not None and torch.is_tensor(audio):
+                    audio = audio.detach().cpu().float().numpy()
+
+                step_audio.append(audio)
+                step_sample_rates.append(sample_rate)
+
                 if self.rank_in_sp_group != 0:
                     continue
 
@@ -992,17 +985,30 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 local_validation_metrics: list[dict[str, float]] = []
                 local_eval_error: str | None = None
 
-                for i, (video, caption, action_path) in enumerate(
-                        zip(step_videos,
-                            step_captions,
-                            step_action_paths,
-                            strict=True)):
+                for i, (video, caption, action_path, audio,
+                        sample_rate) in enumerate(
+                            zip(step_videos,
+                                step_captions,
+                                step_action_paths,
+                                step_audio,
+                                step_sample_rates,
+                                strict=True)):
                     os.makedirs(training_args.output_dir, exist_ok=True)
                     filename = os.path.join(
                         training_args.output_dir,
                         f"validation_step_{global_step}_inference_steps_{num_inference_steps}_rank_{self.global_rank}_video_{i}.mp4"
                     )
                     imageio.mimsave(filename, video, fps=sampling_param.fps)
+                    # Mux audio if available
+                    if (audio is not None and sample_rate is not None
+                            and not self._mux_audio(
+                                filename,
+                                audio,
+                                sample_rate,
+                            )):
+                        logger.warning(
+                            "Audio mux failed for validation video %s; saved video without audio.",
+                            filename)
                     local_video_filenames.append(filename)
 
                     try:
@@ -1068,7 +1074,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     if validation_metrics:
                         metric_logs: dict[str, float] = {}
                         metric_keys = sorted(
-                            {k for row in validation_metrics for k in row.keys()})
+                            {k for row in validation_metrics for k in row})
                         for metric_key in metric_keys:
                             metric_vals = [
                                 row[metric_key] for row in validation_metrics

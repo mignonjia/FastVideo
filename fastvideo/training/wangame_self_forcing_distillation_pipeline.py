@@ -533,10 +533,23 @@ class WanGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
         mouse_cond = batch.get('mouse_cond', None)
         infos = batch['info_list']
 
+        assert clip_feature.shape[0] == first_frame_latent.shape[0], (
+            f"clip_feature batch size {clip_feature.shape[0]} != "
+            f"first_frame_latent batch size {first_frame_latent.shape[0]}")
+        assert first_frame_latent.ndim == 5, (
+            "first_frame_latent must have shape [B, C, T, H, W], got "
+            f"{tuple(first_frame_latent.shape)}")
+        assert first_frame_latent.shape[2] >= self.training_args.num_latent_t, (
+            f"first_frame_latent temporal dim {first_frame_latent.shape[2]} "
+            f"< required num_latent_t {self.training_args.num_latent_t}")
+        first_frame_latent = first_frame_latent[:, :, :self.training_args.
+                                                num_latent_t]
+
         batch_size = clip_feature.shape[0]
         vae_config = self.training_args.pipeline_config.vae_config.arch_config
         num_channels = vae_config.z_dim
         spatial_compression_ratio = vae_config.spatial_compression_ratio
+        expected_num_frames = (self.training_args.num_latent_t - 1) * 4 + 1
 
         latent_height = self.training_args.num_height // spatial_compression_ratio
         latent_width = self.training_args.num_width // spatial_compression_ratio
@@ -558,14 +571,65 @@ class WanGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
         if keyboard_cond is not None and keyboard_cond.numel() > 0:
             keyboard_cond_full = keyboard_cond.to(get_local_torch_device(),
                                                   dtype=torch.bfloat16)
+            assert keyboard_cond_full.shape[1] >= expected_num_frames, (
+                f"keyboard_cond temporal dim {keyboard_cond_full.shape[1]} "
+                f"< expected {expected_num_frames} "
+                f"(num_latent_t={self.training_args.num_latent_t})")
+            keyboard_cond_full = keyboard_cond_full[:, :expected_num_frames, :]
             training_batch.keyboard_cond = keyboard_cond_full  # For Teacher/Critic (dim=6)
         else:
             training_batch.keyboard_cond = None
         if mouse_cond is not None and mouse_cond.numel() > 0:
-            training_batch.mouse_cond = mouse_cond.to(get_local_torch_device(),
-                                                      dtype=torch.bfloat16)
+            mouse_cond_full = mouse_cond.to(get_local_torch_device(),
+                                            dtype=torch.bfloat16)
+            assert mouse_cond_full.shape[1] >= expected_num_frames, (
+                f"mouse_cond temporal dim {mouse_cond_full.shape[1]} "
+                f"< expected {expected_num_frames} "
+                f"(num_latent_t={self.training_args.num_latent_t})")
+            mouse_cond_full = mouse_cond_full[:, :expected_num_frames, :]
+            training_batch.mouse_cond = mouse_cond_full
         else:
             training_batch.mouse_cond = None
+        assert ((training_batch.keyboard_cond is None) ==
+                (training_batch.mouse_cond is None)), (
+                    "keyboard_cond and mouse_cond must either both be present "
+                    "or both be absent")
+
+        if (training_batch.keyboard_cond is not None
+                and training_batch.mouse_cond is not None):
+            viewmats_list = []
+            intrinsics_list = []
+            action_labels_list = []
+            for b in range(batch_size):
+                viewmats, intrinsics, action_labels = process_custom_actions(
+                    training_batch.keyboard_cond[b], training_batch.mouse_cond[b])
+                viewmats_list.append(viewmats)
+                intrinsics_list.append(intrinsics)
+                action_labels_list.append(action_labels)
+
+            training_batch.viewmats = torch.stack(
+                viewmats_list, dim=0).to(get_local_torch_device(),
+                                         dtype=torch.bfloat16)
+            training_batch.intrinsics = torch.stack(
+                intrinsics_list, dim=0).to(get_local_torch_device(),
+                                           dtype=torch.bfloat16)
+            training_batch.action_labels = torch.stack(
+                action_labels_list, dim=0).to(get_local_torch_device(),
+                                              dtype=torch.bfloat16)
+
+            assert training_batch.viewmats.shape[1] == self.training_args.num_latent_t, (
+                f"viewmats temporal dim {training_batch.viewmats.shape[1]} != "
+                f"num_latent_t {self.training_args.num_latent_t}")
+            assert training_batch.intrinsics.shape[1] == self.training_args.num_latent_t, (
+                f"intrinsics temporal dim {training_batch.intrinsics.shape[1]} != "
+                f"num_latent_t {self.training_args.num_latent_t}")
+            assert training_batch.action_labels.shape[1] == self.training_args.num_latent_t, (
+                f"action_labels temporal dim {training_batch.action_labels.shape[1]} != "
+                f"num_latent_t {self.training_args.num_latent_t}")
+        else:
+            training_batch.viewmats = None
+            training_batch.intrinsics = None
+            training_batch.action_labels = None
         training_batch.infos = infos
         return training_batch
 
@@ -583,9 +647,14 @@ class WanGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
         expected_cond_channels = 20
         if image_latents.shape[1] != expected_cond_channels:
             raise ValueError(
-                "Unexpected first_frame_latent channels, "
-                "Expected {expected_cond_channels} (cond_concat), got {image_latents.shape[1]}."
+                f"Unexpected first_frame_latent channels, "
+                f"expected {expected_cond_channels} (cond_concat), got "
+                f"{image_latents.shape[1]}."
             )
+
+        viewmats = training_batch.viewmats
+        intrinsics = training_batch.intrinsics
+        action_labels = training_batch.action_labels
 
         if self.sp_world_size > 1:
             total_frames = image_latents.shape[2]
@@ -602,7 +671,26 @@ class WanGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
                 image_latents = image_latents[:, :, self.rank_in_sp_group, :, :,
                                               :]
 
+                if viewmats is not None:
+                    viewmats = rearrange(viewmats,
+                                         "b (n t) x y -> b n t x y",
+                                         n=self.sp_world_size).contiguous()
+                    viewmats = viewmats[:, self.rank_in_sp_group, :, :, :]
+                if intrinsics is not None:
+                    intrinsics = rearrange(intrinsics,
+                                           "b (n t) x y -> b n t x y",
+                                           n=self.sp_world_size).contiguous()
+                    intrinsics = intrinsics[:, self.rank_in_sp_group, :, :, :]
+                if action_labels is not None:
+                    action_labels = rearrange(action_labels,
+                                              "b (n t) -> b n t",
+                                              n=self.sp_world_size).contiguous()
+                    action_labels = action_labels[:, self.rank_in_sp_group, :]
+
         training_batch.image_latents = image_latents
+        training_batch.viewmats = viewmats
+        training_batch.intrinsics = intrinsics
+        training_batch.action_labels = action_labels
 
         return training_batch
 
@@ -625,42 +713,27 @@ class WanGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline):
         if frame_start is not None and frame_end is not None:
             image_latents = image_latents[:, :, frame_start:frame_end, :, :]
 
-        vae_temporal_compression_ratio = 4
         if frame_start is not None and frame_end is not None:
-            action_frame_start = frame_start * vae_temporal_compression_ratio
-            action_frame_end = (frame_end -
-                                1) * vae_temporal_compression_ratio + 1
-            if frame_start == 0:
-                action_frame_start = 0
-            keyboard_cond_sliced = training_batch.keyboard_cond[:,
-                                                                action_frame_start:action_frame_end, :] if training_batch.keyboard_cond is not None else None
-            mouse_cond_sliced = training_batch.mouse_cond[:,
-                                                          action_frame_start:action_frame_end, :] if training_batch.mouse_cond is not None else None
+            viewmats = training_batch.viewmats[:, frame_start:frame_end, :, :] if training_batch.viewmats is not None else None
+            intrinsics = training_batch.intrinsics[:, frame_start:frame_end, :, :] if training_batch.intrinsics is not None else None
+            action_labels = training_batch.action_labels[:, frame_start:frame_end] if training_batch.action_labels is not None else None
         else:
-            keyboard_cond_sliced = training_batch.keyboard_cond
-            mouse_cond_sliced = training_batch.mouse_cond
+            viewmats = training_batch.viewmats
+            intrinsics = training_batch.intrinsics
+            action_labels = training_batch.action_labels
 
-        if keyboard_cond_sliced is not None and mouse_cond_sliced is not None:
-            viewmats_list = []
-            intrinsics_list = []
-            action_labels_list = []
-            for b in range(noise_input.shape[0]):
-                viewmats, intrinsics, action_labels = process_custom_actions(
-                    keyboard_cond_sliced[b], mouse_cond_sliced[b])
-                viewmats_list.append(viewmats)
-                intrinsics_list.append(intrinsics)
-                action_labels_list.append(action_labels)
-
-            viewmats = torch.stack(viewmats_list, dim=0).to(
-                device=get_local_torch_device(), dtype=torch.bfloat16)
-            intrinsics = torch.stack(intrinsics_list, dim=0).to(
-                device=get_local_torch_device(), dtype=torch.bfloat16)
-            action_labels = torch.stack(action_labels_list, dim=0).to(
-                device=get_local_torch_device(), dtype=torch.bfloat16)
-        else:
-            viewmats = None
-            intrinsics = None
-            action_labels = None
+        if action_labels is not None:
+            assert action_labels.shape[1] == noise_input.shape[1], (
+                f"action_labels temporal dim {action_labels.shape[1]} != "
+                f"noise_input temporal dim {noise_input.shape[1]}")
+        if viewmats is not None:
+            assert viewmats.shape[1] == noise_input.shape[1], (
+                f"viewmats temporal dim {viewmats.shape[1]} != "
+                f"noise_input temporal dim {noise_input.shape[1]}")
+        if intrinsics is not None:
+            assert intrinsics.shape[1] == noise_input.shape[1], (
+                f"intrinsics temporal dim {intrinsics.shape[1]} != "
+                f"noise_input temporal dim {noise_input.shape[1]}")
 
         noisy_model_input = torch.cat(
             [noise_input, image_latents.permute(0, 2, 1, 3, 4)], dim=2)

@@ -169,6 +169,7 @@ def get_parquet_files_and_length(path: str):
         (p for p, c in path_specs if c > 0),
         path_specs[0][0],
     )
+    dataset_root = os.path.realpath(os.path.expanduser(first_path))
     is_single_no_repeat = (
         len(path_specs) == 1 and path_specs[0][1] == 1
     )
@@ -204,8 +205,42 @@ def get_parquet_files_and_length(path: str):
             try:
                 with open(cache_file, "rb") as f:
                     file_names_sorted, lengths_sorted = pickle.load(f)
-                cache_loaded = True
-                logger.info("Successfully loaded cached file info")
+                file_names_sorted = tuple(
+                    os.path.realpath(
+                        os.path.join(os.getcwd(), p)
+                        if not os.path.isabs(p) else p)
+                    for p in file_names_sorted)
+                if is_single_no_repeat:
+                    files_outside_dataset_root = [
+                        file_path for file_path in file_names_sorted
+                        if os.path.commonpath([dataset_root, file_path
+                                               ]) != dataset_root
+                    ]
+                else:
+                    files_outside_dataset_root = []
+                missing_files = [
+                    file_path for file_path in file_names_sorted
+                    if not os.path.exists(file_path)
+                ]
+                if files_outside_dataset_root:
+                    logger.warning(
+                        "Cached parquet file list points outside dataset root "
+                        "(%s). Cache will be rebuilt. First out-of-root file: %s",
+                        dataset_root,
+                        files_outside_dataset_root[0],
+                    )
+                    cache_loaded = False
+                elif missing_files:
+                    logger.warning(
+                        "Cached parquet file list contains %d missing files. "
+                        "Cache will be rebuilt. First missing file: %s",
+                        len(missing_files),
+                        missing_files[0],
+                    )
+                    cache_loaded = False
+                else:
+                    cache_loaded = True
+                    logger.info("Successfully loaded cached file info")
             except Exception as e:
                 logger.error("Error loading cached file info: %s", str(e))
                 logger.info("Falling back to scanning files")
@@ -237,7 +272,6 @@ def get_parquet_files_and_length(path: str):
             combined.sort(key=lambda x: (x[0], x[2]))
             file_names_sorted = tuple(x[0] for x in combined)
             lengths_sorted = tuple(x[1] for x in combined)
-
             # Save the cache
             os.makedirs(cache_dir, exist_ok=True)
             with open(cache_file, "wb") as f:
@@ -252,6 +286,15 @@ def get_parquet_files_and_length(path: str):
     logger.info("Loading cached file info from %s after barrier", cache_file)
     with open(cache_file, "rb") as f:
         file_names_sorted, lengths_sorted = pickle.load(f)
+    if len(file_names_sorted) == 0:
+        raise RuntimeError(
+            "Cached parquet metadata is empty after synchronization at "
+            f"{cache_file}. "
+            "Please verify the dataset path and regenerate cache.")
+    if len(file_names_sorted) != len(lengths_sorted):
+        raise RuntimeError(
+            "Cached parquet metadata is corrupted at "
+            f"{cache_file}: file count and length count do not match.")
 
     return file_names_sorted, lengths_sorted
 

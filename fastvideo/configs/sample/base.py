@@ -73,12 +73,9 @@ class SamplingParam:
     boundary_ratio: float | None = None
     sigmas: list[float] | None = None
 
-    # TeaCache parameters
-    enable_teacache: bool = False
-
     # Misc
     save_video: bool = True
-    return_frames: bool = False
+    return_frames: bool = True
     return_trajectory_latents: bool = False  # returns all latents for each timestep
     return_trajectory_decoded: bool = False  # returns decoded latents for each timestep
 
@@ -221,7 +218,7 @@ class SamplingParam:
         parser.add_argument(
             "--return-frames",
             action="store_true",
-            default=SamplingParam.return_frames,
+            default=False,
             help="Whether to return the raw frames",
         )
         parser.add_argument(

@@ -169,43 +169,50 @@ def _scan_parquet_files_for_path(p: str) -> tuple[list[str], list[int]]:
 
 
 def get_parquet_files_and_length(path: str):
-    """
-    Collect parquet file paths and row lengths from one or more directories.
-    path: single directory, or comma-separated "path" or "path:N" (N = repeat count).
-    E.g. "/dir1:2,/dir2:1" -> dir1's files appear 2x (oversampled), dir2 once.
-    """
+    # ===== Custom block (hao): support multi data_path entries with repeat counts =====
+    # Accepted formats:
+    #   "/path/a"
+    #   "/path/a,/path/b"
+    #   "/path/a:2,/path/b:1,/path/c:0"
     path_specs = _parse_data_path_specs(path)
     if not path_specs:
         raise ValueError(
-            "data_path must be a non-empty path or comma-separated path specs"
-        )
-    # Use first path with count > 0 for cache_dir (single-path case only)
-    first_path = next(
-        (p for p, c in path_specs if c > 0),
-        path_specs[0][0],
-    )
-    is_single_no_repeat = (
-        len(path_specs) == 1 and path_specs[0][1] == 1
-    )
-    effective_path = path.strip()
-    # Single path, no repeat: cache under that path (backward compatible).
-    # Multi-path or repeat: cache in a neutral dir keyed by hash of full path spec,
-    # so we never reuse "first path's" cache and the cached list is the merged list.
+            "data_path must be a non-empty path or comma-separated path specs")
+
+    resolved_path_specs = [
+        (os.path.realpath(os.path.expanduser(p)), count)
+        for p, count in path_specs
+    ]
+    active_roots = [p for p, c in resolved_path_specs if c > 0]
+    if not active_roots:
+        raise ValueError("No active dataset paths after parsing data_path")
+
+    is_single_no_repeat = (len(resolved_path_specs) == 1
+                           and resolved_path_specs[0][1] == 1)
     if is_single_no_repeat:
-        cache_dir = os.path.join(first_path, "map_style_cache")
-        cache_suffix = "file_info.pkl"
+        dataset_root = active_roots[0]
+        cache_dir = os.path.join(dataset_root, "map_style_cache")
+        cache_file = os.path.join(cache_dir, "file_info.pkl")
     else:
+        # Multi-path/repeat mode uses a neutral cache keyed by full path spec.
+        dataset_root = active_roots[0]
         neutral_root = os.environ.get(
             "FASTVIDEO_MAP_STYLE_CACHE_DIR",
-            os.path.join(os.path.expanduser("~"), ".cache", "fastvideo", "map_style_cache"),
+            os.path.join(os.path.expanduser("~"), ".cache", "fastvideo",
+                         "map_style_cache"),
         )
         cache_dir = neutral_root
-        cache_suffix = (
-            "file_info_"
-            + hashlib.md5(effective_path.encode()).hexdigest()[:16]
-            + ".pkl"
+        cache_file = os.path.join(
+            cache_dir,
+            "file_info_" + hashlib.md5(path.strip().encode()).hexdigest()[:16]
+            + ".pkl",
         )
-    cache_file = os.path.join(cache_dir, cache_suffix)
+
+    def _is_under_active_roots(file_path: str) -> bool:
+        return any(
+            os.path.commonpath([root, file_path]) == root
+            for root in active_roots)
+    # ===== End custom block =====
 
     # Only rank 0 checks for cache and scans files if needed
     if get_world_rank() == 0:
@@ -219,8 +226,38 @@ def get_parquet_files_and_length(path: str):
             try:
                 with open(cache_file, "rb") as f:
                     file_names_sorted, lengths_sorted = pickle.load(f)
-                cache_loaded = True
-                logger.info("Successfully loaded cached file info")
+                file_names_sorted = tuple(
+                    os.path.realpath(
+                        os.path.join(os.getcwd(), p)
+                        if not os.path.isabs(p) else p)
+                    for p in file_names_sorted)
+                files_outside_dataset_root = [
+                    file_path for file_path in file_names_sorted
+                    if not _is_under_active_roots(file_path)
+                ]
+                missing_files = [
+                    file_path for file_path in file_names_sorted
+                    if not os.path.exists(file_path)
+                ]
+                if files_outside_dataset_root:
+                    logger.warning(
+                        "Cached parquet file list points outside active dataset roots "
+                        "(%s). Cache will be rebuilt. First out-of-root file: %s",
+                        active_roots,
+                        files_outside_dataset_root[0],
+                    )
+                    cache_loaded = False
+                elif missing_files:
+                    logger.warning(
+                        "Cached parquet file list contains %d missing files. "
+                        "Cache will be rebuilt. First missing file: %s",
+                        len(missing_files),
+                        missing_files[0],
+                    )
+                    cache_loaded = False
+                else:
+                    cache_loaded = True
+                    logger.info("Successfully loaded cached file info")
             except Exception as e:
                 logger.error("Error loading cached file info: %s", str(e))
                 logger.info("Falling back to scanning files")
@@ -228,30 +265,52 @@ def get_parquet_files_and_length(path: str):
 
         # If cache not loaded (either doesn't exist or failed to load), scan files
         if not cache_loaded:
-            logger.info(
-                "Scanning parquet files (path specs: %s)",
-                [(p, c) for p, c in path_specs],
-            )
-            # Build list with repeats; use (path, length, sort_index) for stable order
-            # Skip paths with count 0 (no I/O for disabled paths)
-            combined: list[tuple[str, int, int]] = []
-            sort_index = 0
-            for p, count in path_specs:
-                if count == 0:
-                    continue
-                fnames, lens = _scan_parquet_files_for_path(p)
-                for _ in range(count):
-                    for f, ln in zip(fnames, lens, strict=True):
-                        combined.append((f, ln, sort_index))
-                        sort_index += 1
-            if not combined:
-                raise ValueError(
-                    "No parquet files found in the dataset (paths: %s)"
-                    % [p for p, _ in path_specs]
-                )
-            combined.sort(key=lambda x: (x[0], x[2]))
-            file_names_sorted = tuple(x[0] for x in combined)
-            lengths_sorted = tuple(x[1] for x in combined)
+            if is_single_no_repeat:
+                logger.info("Scanning parquet files to get lengths")
+                lengths = []
+                file_names = []
+                for root, _, files in os.walk(dataset_root):
+                    for file in sorted(files):
+                        if file.endswith('.parquet'):
+                            file_path = os.path.realpath(os.path.join(root, file))
+                            file_names.append(file_path)
+                if len(file_names) == 0:
+                    raise FileNotFoundError(
+                        "No parquet files found under dataset path: "
+                        f"{path}. "
+                        "Please verify this path points to preprocessed parquet "
+                        "data.")
+                for file_path in tqdm.tqdm(
+                        file_names, desc="Reading parquet files to get lengths"):
+                    num_rows = pq.ParquetFile(file_path).metadata.num_rows
+                    lengths.append(num_rows)
+                # sort according to file name to ensure all rank has the same order
+                file_names_sorted, lengths_sorted = zip(*sorted(
+                    zip(file_names, lengths, strict=True),
+                    key=lambda x: x[0]),
+                                                        strict=True)
+            else:
+                # ===== Custom block (hao): multi-path scan and weighted repeats =====
+                logger.info("Scanning parquet files (path specs: %s)",
+                            [(p, c) for p, c in resolved_path_specs])
+                combined: list[tuple[str, int, int]] = []
+                sort_index = 0
+                for p, count in resolved_path_specs:
+                    if count == 0:
+                        continue
+                    fnames, lens = _scan_parquet_files_for_path(p)
+                    for _ in range(count):
+                        for f, ln in zip(fnames, lens, strict=True):
+                            combined.append((os.path.realpath(f), ln, sort_index))
+                            sort_index += 1
+                if not combined:
+                    raise FileNotFoundError(
+                        "No parquet files found under active dataset paths: "
+                        f"{active_roots}")
+                combined.sort(key=lambda x: (x[0], x[2]))
+                file_names_sorted = tuple(x[0] for x in combined)
+                lengths_sorted = tuple(x[1] for x in combined)
+                # ===== End custom block =====
 
             # Save the cache
             os.makedirs(cache_dir, exist_ok=True)
@@ -267,6 +326,19 @@ def get_parquet_files_and_length(path: str):
     logger.info("Loading cached file info from %s after barrier", cache_file)
     with open(cache_file, "rb") as f:
         file_names_sorted, lengths_sorted = pickle.load(f)
+    file_names_sorted = tuple(
+        os.path.realpath(
+            os.path.join(os.getcwd(), p) if not os.path.isabs(p) else p)
+        for p in file_names_sorted)
+    if len(file_names_sorted) == 0:
+        raise RuntimeError(
+            "Cached parquet metadata is empty after synchronization at "
+            f"{cache_file}. "
+            "Please verify the dataset path and regenerate cache.")
+    if len(file_names_sorted) != len(lengths_sorted):
+        raise RuntimeError(
+            "Cached parquet metadata is corrupted at "
+            f"{cache_file}: file count and length count do not match.")
 
     return file_names_sorted, lengths_sorted
 

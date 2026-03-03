@@ -20,6 +20,7 @@ from einops import rearrange
 from torch.utils.data import DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
 from tqdm.auto import tqdm
+from diffusers import FlowMatchEulerDiscreteScheduler
 
 import fastvideo.envs as envs
 try:
@@ -50,7 +51,7 @@ from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
     compute_density_for_timestep_sampling, count_trainable,
     count_trainable_total, get_scheduler, get_sigmas, load_checkpoint,
-    normalize_dit_input, save_checkpoint, shard_latents_across_sp)
+    normalize_dit_input, save_checkpoint)
 from fastvideo.utils import (is_vmoba_available, is_vsa_available,
                              set_random_seed, shallow_asdict)
 
@@ -480,26 +481,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
             # make sure no implicit broadcasting happens
             assert model_pred.shape == target.shape, f"model_pred.shape: {model_pred.shape}, target.shape: {target.shape}"
 
-            # Defensive: avoid NaNs/div0 if an upstream bug ever produces empty tensors.
-            # mean(empty) -> NaN; division by 0 -> inf/NaN. Keep a 0 loss with grad history.
-            if model_pred.numel() == 0:
-                loss = (model_pred.sum() *
-                        0.0) / self.training_args.gradient_accumulation_steps
-            else:
-                # Compute MSE on one SP shard. We shard along the flattened token axis
-                # (t*h*w) with optional padding so (t*h*w) need not be divisible by sp_size.
-                sp_world_size = get_sp_group().world_size
-                if sp_world_size > 1:
-                    sharded_pred = shard_latents_across_sp(model_pred)
-                    sharded_target = shard_latents_across_sp(target)
-                    local_sse = ((sharded_pred.float() -
-                                  sharded_target.float())**2).sum()
-                    loss = (sp_world_size * local_sse / model_pred.numel()
-                            ) / self.training_args.gradient_accumulation_steps
-                else:
-                    loss = (torch.mean(
-                        (model_pred.float() - target.float())**2) /
-                            self.training_args.gradient_accumulation_steps)
+            loss = (torch.mean((model_pred.float() - target.float())**2) /
+                    self.training_args.gradient_accumulation_steps)
 
             loss.backward()
 
@@ -645,9 +628,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
         self.noise_gen_cuda = torch.Generator(
             device=current_platform.device_name).manual_seed(self.seed)
         self.validation_random_generator = torch.Generator(
-            device="cpu").manual_seed(self.seed)
-        logger.info("Initialized random seeds with seed: %s", self.seed)
-
+            device="cpu").manual_seed(self.seed + self.global_rank)
+        logger.info("Initialized random seeds with seed: %s",
+                    self.seed + self.global_rank)
         self.noise_scheduler = FlowMatchEulerDiscreteScheduler()
 
         if self.training_args.resume_from_checkpoint:
@@ -1001,6 +984,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
             step_captions: list[str] = []
             step_action_paths: list[str | None] = []
 
+            step_audio: list[np.ndarray | None] = []
+            step_sample_rates: list[int | None] = []
+
             for validation_batch in validation_dataloader:
                 batch = self._prepare_validation_batch(sampling_param,
                                                        training_args,
@@ -1024,6 +1010,16 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     batch, training_args)
                 samples = output_batch.output.cpu()
 
+                # Capture audio if available
+                audio = output_batch.extra.get("audio")
+                sample_rate = output_batch.extra.get("audio_sample_rate")
+
+                if audio is not None and torch.is_tensor(audio):
+                    audio = audio.detach().cpu().float().numpy()
+
+                step_audio.append(audio)
+                step_sample_rates.append(sample_rate)
+
                 if self.rank_in_sp_group != 0:
                     continue
 
@@ -1041,16 +1037,35 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 step_action_paths.append(action_path)
 
             # Only sp_group leaders (rank_in_sp_group == 0) need to send their
-            # results to global rank 0
-            if self.rank_in_sp_group == 0:
-                local_video_filenames: list[str] = []
-                local_validation_metrics: list[dict[str, float]] = []
-                local_eval_error: str | None = None
+            # results to global rank 0.
+            if self.rank_in_sp_group == 0 and self.global_rank == 0:
+                # Global rank 0 collects results from all sp_group leaders.
+                all_videos = step_videos
+                all_captions = step_captions
+                all_audios = step_audio
+                all_sample_rates = step_sample_rates
+                all_action_paths = step_action_paths
 
-                for i, (video, caption, action_path) in enumerate(
-                        zip(step_videos,
-                            step_captions,
-                            step_action_paths,
+                for sp_group_idx in range(1, num_sp_groups):
+                    src_rank = sp_group_idx * self.sp_world_size
+                    recv_videos = world_group.recv_object(src=src_rank)
+                    recv_captions = world_group.recv_object(src=src_rank)
+                    recv_audios = world_group.recv_object(src=src_rank)
+                    recv_sample_rates = world_group.recv_object(src=src_rank)
+                    recv_action_paths = world_group.recv_object(src=src_rank)
+
+                    all_videos.extend(recv_videos)
+                    all_captions.extend(recv_captions)
+                    all_audios.extend(recv_audios)
+                    all_sample_rates.extend(recv_sample_rates)
+                    all_action_paths.extend(recv_action_paths)
+
+                video_filenames: list[str] = []
+                for i, (video, caption, audio, sample_rate) in enumerate(
+                        zip(all_videos,
+                            all_captions,
+                            all_audios,
+                            all_sample_rates,
                             strict=True)):
                     os.makedirs(training_args.output_dir, exist_ok=True)
                     filename = os.path.join(
@@ -1058,8 +1073,39 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         f"validation_step_{global_step}_inference_steps_{num_inference_steps}_rank_{self.global_rank}_video_{i}.mp4"
                     )
                     imageio.mimsave(filename, video, fps=sampling_param.fps)
-                    local_video_filenames.append(filename)
+                    # Mux audio if available
+                    if (audio is not None and sample_rate is not None
+                            and not self._mux_audio(
+                                filename,
+                                audio,
+                                sample_rate,
+                            )):
+                        logger.warning(
+                            "Audio mux failed for validation video %s; saved video without audio.",
+                            filename)
+                    video_filenames.append(filename)
 
+                artifacts = []
+                for filename, caption in zip(video_filenames,
+                                             all_captions,
+                                             strict=True):
+                    video_artifact = self.tracker.video(filename,
+                                                        caption=caption)
+                    if video_artifact is not None:
+                        artifacts.append(video_artifact)
+                if artifacts:
+                    logs = {
+                        f"validation_videos_{num_inference_steps}_steps":
+                        artifacts
+                    }
+                    self.tracker.log_artifacts(logs, global_step)
+                # ===== Custom block (hao): validation flow-metric evaluation =====
+                validation_metrics: list[dict[str, float]] = []
+                eval_errors: list[str] = []
+                for filename, caption, action_path in zip(video_filenames,
+                                                          all_captions,
+                                                          all_action_paths,
+                                                          strict=True):
                     try:
                         sample_metrics = self._evaluate_validation_video(
                             video_path=filename,
@@ -1069,91 +1115,51 @@ class TrainingPipeline(LoRAPipeline, ABC):
                             num_inference_steps=num_inference_steps,
                         )
                         if sample_metrics:
-                            local_validation_metrics.append(sample_metrics)
+                            validation_metrics.append(sample_metrics)
                     except Exception as e:
-                        local_eval_error = (
+                        error_msg = (
                             f"rank {self.global_rank} validation eval failed "
                             f"for {filename}: {e}")
-                        logger.exception(local_eval_error)
-                        break
+                        logger.exception(error_msg)
+                        eval_errors.append(error_msg)
 
-                if self.global_rank == 0:
-                    all_video_filenames = local_video_filenames
-                    all_captions = step_captions
-                    validation_metrics = local_validation_metrics
-                    eval_errors: list[str] = []
-                    if local_eval_error:
-                        eval_errors.append(local_eval_error)
+                if eval_errors:
+                    raise RuntimeError("Validation flow evaluation failed:\n" +
+                                       "\n".join(eval_errors))
 
-                    # Receive from other sp_group leaders
-                    for sp_group_idx in range(1, num_sp_groups):
-                        src_rank = sp_group_idx * self.sp_world_size
-                        recv_video_filenames = world_group.recv_object(
-                            src=src_rank)
-                        recv_captions = world_group.recv_object(src=src_rank)
-                        recv_metrics = world_group.recv_object(src=src_rank)
-                        recv_error = world_group.recv_object(src=src_rank)
+                if validation_metrics:
+                    metric_logs: dict[str, float] = {}
+                    metric_keys = sorted(
+                        {k for row in validation_metrics for k in row.keys()})
+                    for metric_key in metric_keys:
+                        metric_vals = [
+                            row[metric_key] for row in validation_metrics
+                            if metric_key in row and np.isfinite(row[metric_key])
+                        ]
+                        if not metric_vals:
+                            continue
+                        metric_logs[f"metrics/{metric_key}"] = float(
+                            np.mean(metric_vals))
+                    self.tracker.log(metric_logs, global_step)
 
-                        all_video_filenames.extend(recv_video_filenames)
-                        all_captions.extend(recv_captions)
-                        validation_metrics.extend(recv_metrics)
-                        if recv_error:
-                            eval_errors.append(str(recv_error))
+                    mf_val = metric_logs.get("metrics/mf_angle_err_mean")
+                    if mf_val is not None:
+                        self._last_mf_angle_err_mean = mf_val
+                # ===== End custom block =====
+            elif self.rank_in_sp_group == 0:
+                # Other sp_group leaders send their results to global rank 0
+                world_group.send_object(step_videos, dst=0)
+                world_group.send_object(step_captions, dst=0)
+                world_group.send_object(step_audio, dst=0)
+                world_group.send_object(step_sample_rates, dst=0)
+                world_group.send_object(step_action_paths, dst=0)
 
-                    if eval_errors:
-                        raise RuntimeError(
-                            "Validation flow evaluation failed:\n" +
-                            "\n".join(eval_errors))
-
-                    artifacts = []
-                    for filename, caption in zip(all_video_filenames,
-                                                 all_captions,
-                                                 strict=True):
-                        video_artifact = self.tracker.video(filename,
-                                                            caption=caption)
-                        if video_artifact is not None:
-                            artifacts.append(video_artifact)
-                    if artifacts:
-                        logs = {
-                            f"validation_videos_{num_inference_steps}_steps":
-                            artifacts
-                        }
-                        self.tracker.log_artifacts(logs, global_step)
-
-                    if validation_metrics:
-                        metric_logs: dict[str, float] = {}
-                        metric_keys = sorted(
-                            {k for row in validation_metrics for k in row.keys()})
-                        for metric_key in metric_keys:
-                            metric_vals = [
-                                row[metric_key] for row in validation_metrics
-                                if metric_key in row
-                                and np.isfinite(row[metric_key])
-                            ]
-                            if not metric_vals:
-                                continue
-                            metric_logs[f"metrics/{metric_key}"] = float(
-                                np.mean(metric_vals))
-                        self.tracker.log(metric_logs, global_step)
-
-                        mf_val = metric_logs.get(
-                            "metrics/mf_angle_err_mean")
-                        if mf_val is not None:
-                            self._last_mf_angle_err_mean = mf_val
-                else:
-                    # Other sp_group leaders send their local results to rank 0
-                    world_group.send_object(local_video_filenames, dst=0)
-                    world_group.send_object(step_captions, dst=0)
-                    world_group.send_object(local_validation_metrics, dst=0)
-                    world_group.send_object(local_eval_error, dst=0)
-                    if local_eval_error:
-                        raise RuntimeError(local_eval_error)
-
-        # Broadcast the latest mf_angle_err_mean from rank 0 to all ranks
-        _mf_tensor = torch.tensor(
-            [self._last_mf_angle_err_mean], device=self.device)
+        # ===== Custom block (hao): broadcast latest eval metric to all ranks =====
+        _mf_tensor = torch.tensor([self._last_mf_angle_err_mean],
+                                  device=self.device)
         dist.broadcast(_mf_tensor, src=0)
         self._last_mf_angle_err_mean = _mf_tensor.item()
+        # ===== End custom block =====
 
         # Re-enable gradients for training
         training_args.inference_mode = False

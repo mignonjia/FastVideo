@@ -169,7 +169,7 @@ def _scan_parquet_files_for_path(p: str) -> tuple[list[str], list[int]]:
 
 
 def get_parquet_files_and_length(path: str):
-    # ===== Custom block (hao): support multi data_path entries with repeat counts =====
+    # ===== Custom block (wangame): support multi data_path entries with repeat counts =====
     # Accepted formats:
     #   "/path/a"
     #   "/path/a,/path/b"
@@ -212,7 +212,7 @@ def get_parquet_files_and_length(path: str):
         return any(
             os.path.commonpath([root, file_path]) == root
             for root in active_roots)
-    # ===== End custom block =====
+    # ===== End custom block (wangame) =====
 
     # Only rank 0 checks for cache and scans files if needed
     if get_world_rank() == 0:
@@ -290,7 +290,7 @@ def get_parquet_files_and_length(path: str):
                     key=lambda x: x[0]),
                                                         strict=True)
             else:
-                # ===== Custom block (hao): multi-path scan and weighted repeats =====
+                # ===== Custom block (wangame): multi-path scan and weighted repeats =====
                 logger.info("Scanning parquet files (path specs: %s)",
                             [(p, c) for p, c in resolved_path_specs])
                 combined: list[tuple[str, int, int]] = []
@@ -310,7 +310,7 @@ def get_parquet_files_and_length(path: str):
                 combined.sort(key=lambda x: (x[0], x[2]))
                 file_names_sorted = tuple(x[0] for x in combined)
                 lengths_sorted = tuple(x[1] for x in combined)
-                # ===== End custom block =====
+                # ===== End custom block (wangame) =====
 
             # Save the cache
             os.makedirs(cache_dir, exist_ok=True)

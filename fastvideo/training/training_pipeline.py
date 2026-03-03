@@ -1099,7 +1099,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         artifacts
                     }
                     self.tracker.log_artifacts(logs, global_step)
-                # ===== Custom block (hao): validation flow-metric evaluation =====
+                # ===== Custom block (wangame): validation flow-metric evaluation =====
                 validation_metrics: list[dict[str, float]] = []
                 eval_errors: list[str] = []
                 for filename, caption, action_path in zip(video_filenames,
@@ -1145,7 +1145,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     mf_val = metric_logs.get("metrics/mf_angle_err_mean")
                     if mf_val is not None:
                         self._last_mf_angle_err_mean = mf_val
-                # ===== End custom block =====
+                # ===== End custom block (wangame) =====
             elif self.rank_in_sp_group == 0:
                 # Other sp_group leaders send their results to global rank 0
                 world_group.send_object(step_videos, dst=0)
@@ -1154,12 +1154,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 world_group.send_object(step_sample_rates, dst=0)
                 world_group.send_object(step_action_paths, dst=0)
 
-        # ===== Custom block (hao): broadcast latest eval metric to all ranks =====
+        # ===== Custom block (wangame): broadcast latest eval metric to all ranks =====
         _mf_tensor = torch.tensor([self._last_mf_angle_err_mean],
                                   device=self.device)
         dist.broadcast(_mf_tensor, src=0)
         self._last_mf_angle_err_mean = _mf_tensor.item()
-        # ===== End custom block =====
+        # ===== End custom block (wangame) =====
 
         # Re-enable gradients for training
         training_args.inference_mode = False

@@ -30,6 +30,7 @@ except Exception:
     pass
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset import build_parquet_map_style_dataloader
+from fastvideo.dataset.parquet_dataset_map_style import build_bot_died_excluded_indices
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
 from fastvideo.dataset.validation_dataset import ValidationDataset
 from fastvideo.distributed import (cleanup_dist_env_and_memory,
@@ -195,6 +196,30 @@ class TrainingPipeline(LoRAPipeline, ABC):
             text_len,  # type: ignore[attr-defined]
             seed=self.seed,
             reshuffle_each_epoch=training_args.reshuffle_each_epoch)
+
+        # ── bot_died filter ────────────────────────────────────────────────
+        world_group = get_world_group()
+        bot_died_excluded: set[int] | None = None
+        if training_args.apply_bot_died_filter:
+            if self.global_rank == 0:
+                bot_died_excluded = build_bot_died_excluded_indices(
+                    training_args.data_path,
+                    list(self.train_dataset.parquet_files),
+                    list(self.train_dataset.lengths),
+                )
+            bot_died_excluded = world_group.broadcast_object(
+                bot_died_excluded, src=0)
+
+            if bot_died_excluded:
+                total = sum(self.train_dataset.lengths)
+                valid_indices = [i for i in range(total)
+                                if i not in bot_died_excluded]
+                self.train_dataset.sampler.set_candidate_indices(
+                    valid_indices, epoch=0)
+                logger.info(
+                    "Applied bot_died filter: excluded %d / %d entries, "
+                    "%d remaining",
+                    len(bot_died_excluded), total, len(valid_indices))
 
         self.noise_scheduler = noise_scheduler
         if self.training_args.boundary_ratio is not None:
@@ -825,8 +850,18 @@ class TrainingPipeline(LoRAPipeline, ABC):
                             self.training_args.gradient_accumulation_steps /
                             self.training_args.sp_size *
                             self.training_args.train_sp_batch_size)
+        raw_num_examples = len(self.train_dataset)
+        num_examples = raw_num_examples
+        sampler = getattr(self.train_dataset, "sampler", None)
+        if (sampler is not None and hasattr(sampler, "sp_group_local_indices")
+                and hasattr(sampler, "num_sp_groups")):
+            num_examples = (len(sampler.sp_group_local_indices) *
+                            sampler.num_sp_groups)
+
         logger.info("***** Running training *****")
-        logger.info("  Num examples = %s", len(self.train_dataset))
+        logger.info("  Num examples = %s", num_examples)
+        if num_examples != raw_num_examples:
+            logger.info("  Raw dataset rows = %s", raw_num_examples)
         logger.info("  Dataloader size = %s", len(self.train_dataloader))
         logger.info("  Num Epochs = %s", self.num_train_epochs)
         logger.info("  Resume training from step %s",

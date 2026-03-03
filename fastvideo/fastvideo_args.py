@@ -920,6 +920,10 @@ class TrainingArgs(FastVideoArgs):
     # for this many steps to let the base model stabilize first, then enable them.
     action_warmup_steps: int = 0
 
+    # When True, exclude training samples whose file_name appears in a
+    # ``../filter/bot_died.json`` file next to each preprocessed directory.
+    apply_bot_died_filter: bool = False
+
     # distillation args
     generator_update_interval: int = 5
     dfake_gen_update_ratio: int = 5  # self-forcing: how often to train generator vs critic
@@ -1314,6 +1318,13 @@ class TrainingArgs(FastVideoArgs):
                             help="Number of steps to keep action modules "
                                  "(action_embedder, to_out_prope) frozen to let "
                                  "the base model stabilize first")
+
+        parser.add_argument("--apply-bot-died-filter",
+                            action=StoreBoolean,
+                            default=TrainingArgs.apply_bot_died_filter,
+                            help="Exclude samples whose file_name appears in "
+                                 "../filter/bot_died.json next to each "
+                                 "preprocessed data directory")
 
         # V-MoBA parameters
         parser.add_argument(

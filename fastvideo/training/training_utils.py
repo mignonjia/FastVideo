@@ -30,6 +30,36 @@ logger = init_logger(__name__)
 _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES = False
 
 
+def _extract_step_from_checkpoint_path(checkpoint_path: str) -> int:
+    """
+    Extract step from a checkpoint path.
+
+    Supports:
+    1. A checkpoint directory named `checkpoint-<int>`
+    2. A checkpoint directory named `checkpoint-best` with `best_metric.json`
+    """
+    checkpoint_name = os.path.basename(os.path.normpath(checkpoint_path))
+    if checkpoint_name.startswith("checkpoint-"):
+        step_str = checkpoint_name.split("checkpoint-", maxsplit=1)[-1]
+        if step_str.isdigit():
+            return int(step_str)
+        if step_str == "best":
+            best_metric_path = os.path.join(checkpoint_path, "best_metric.json")
+            if os.path.isfile(best_metric_path):
+                with open(best_metric_path) as f:
+                    try:
+                        return int(json.load(f)["step"])
+                    except (KeyError, TypeError, ValueError) as exc:
+                        raise ValueError(
+                            f"Invalid `step` in {best_metric_path}") from exc
+            raise ValueError(
+                f"Missing best metric file: {best_metric_path}")
+        raise ValueError(
+            f"Invalid checkpoint directory name: {checkpoint_name}")
+
+    raise ValueError(f"Cannot load step from checkpoint path: {checkpoint_path}")
+
+
 def gather_state_dict_on_cpu_rank0(
     model,
     device: torch.device | None = None,
@@ -567,9 +597,7 @@ def load_checkpoint(transformer,
         logger.warning("Checkpoint path %s does not exist", checkpoint_path)
         return 0
 
-    # Extract step number from checkpoint path
-    step = int(
-        os.path.basename(os.path.normpath(checkpoint_path)).split('-')[-1])
+    step = _extract_step_from_checkpoint_path(checkpoint_path)
 
     if rank == 0:
         logger.info("Loading checkpoint from step %s", step)
@@ -601,7 +629,14 @@ def load_checkpoint(transformer,
                 local_main_process_only=False)
 
     begin_time = time.perf_counter()
-    dcp.load(states, checkpoint_id=dcp_dir)
+    try:
+        dcp.load(states, checkpoint_id=dcp_dir)  # strict/default
+    except RuntimeError as exc:
+        msg = str(exc)
+        if "not in the checkpoint" not in msg and "Missing key" not in msg:
+            raise
+        planner = dcp.DefaultLoadPlanner(allow_partial_load=True)
+        dcp.load(states, checkpoint_id=dcp_dir, planner=planner)
     end_time = time.perf_counter()
 
     logger.info("rank: %s, distributed checkpoint loaded in %.2f seconds",
@@ -656,8 +691,7 @@ def load_distillation_checkpoint(
                        checkpoint_path)
         return 0
 
-    # Extract step number from checkpoint path
-    step = int(os.path.basename(checkpoint_path).split('-')[-1])
+    step = _extract_step_from_checkpoint_path(checkpoint_path)
 
     if rank == 0:
         logger.info("Loading distillation checkpoint from step %s", step)

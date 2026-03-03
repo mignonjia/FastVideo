@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=wangame_1.3b
+#SBATCH --job-name=wg-bi
 #SBATCH --partition=main
 #SBATCH --nodes=4
 #SBATCH --ntasks=4
@@ -47,6 +47,7 @@ LEARNING_RATE=1e-5
 
 MODEL_PATH="weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers"
 # CKPT_SAFETENSOR="wangame_1.3b_with_warmup_lr_1e-5/checkpoint-7000/transformer/diffusion_pytorch_model.safetensors"
+# RESUME_FROM_CHECKPOINT="/mnt/weka/home/hao.zhang/mhuo/FastVideo/wangame_1.3b_mc_prompt_filter_died/checkpoint-best"
 #
 # Data dirs (use one of the following):
 #   - DATA_DIR_ALL: all datasets below combined (comma-separated)
@@ -117,6 +118,7 @@ model_args=(
 dataset_args=(
   --data_path "$DATA_DIR"
   --dataloader_num_workers 1
+  --apply_bot_died_filter False
 )
 
 # Validation arguments

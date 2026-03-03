@@ -39,6 +39,7 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
         drop_first_row: bool = False,
         reshuffle_each_epoch: bool = True,
         seed: int = 0,
+        candidate_indices: list[int] | None = None,
     ):
         self.batch_size = batch_size
         self.dataset_size = dataset_size
@@ -49,20 +50,26 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
         self.sp_world_size = sp_world_size
         self.drop_first_row = drop_first_row
         self.reshuffle_each_epoch = reshuffle_each_epoch
+        self.candidate_indices = (torch.as_tensor(candidate_indices,
+                                                  dtype=torch.long)
+                                  if candidate_indices is not None else None)
 
         self._build_indices(0)  # build indices for epoch 0 to initialize the sampler
 
     def _build_indices(self, epoch: int) -> None:
         # ── epoch-level RNG ────────────────────────────────────────────────
         rng = torch.Generator().manual_seed(self.seed + epoch)
-        # Create a random permutation of all indices
-        global_indices = torch.randperm(self.dataset_size, generator=rng)
+        if self.candidate_indices is None:
+            global_indices = torch.randperm(self.dataset_size, generator=rng)
+        else:
+            perm = torch.randperm(len(self.candidate_indices), generator=rng)
+            global_indices = self.candidate_indices[perm]
 
-        dataset_size = self.dataset_size
+        dataset_size = len(global_indices)
         if self.drop_first_row:
             # drop 0 in global_indices
             global_indices = global_indices[global_indices != 0]
-            dataset_size = dataset_size - 1
+            dataset_size = len(global_indices)
 
         if self.drop_last:
             # For drop_last=True, we:
@@ -91,6 +98,14 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
         self.sp_group_local_indices = sp_group_local_indices
         logger.info("Dataset size for each sp group: %d",
                     len(sp_group_local_indices))
+
+    def set_candidate_indices(self,
+                              candidate_indices: list[int] | None,
+                              epoch: int = 0) -> None:
+        self.candidate_indices = (torch.as_tensor(candidate_indices,
+                                                  dtype=torch.long)
+                                  if candidate_indices is not None else None)
+        self._build_indices(epoch)
 
     def set_epoch(self, epoch: int) -> None:
         if not self.reshuffle_each_epoch:
@@ -330,6 +345,7 @@ class LatentsParquetMapStyleDataset(Dataset):
         drop_first_row: bool = False,
         reshuffle_each_epoch: bool = False,
         text_padding_length: int = 512,
+        candidate_indices: list[int] | None = None,
     ):
         super().__init__()
         self.path = path
@@ -353,6 +369,7 @@ class LatentsParquetMapStyleDataset(Dataset):
             drop_first_row=drop_first_row,
             reshuffle_each_epoch=reshuffle_each_epoch,
             seed=seed,
+            candidate_indices=candidate_indices,
         )
         logger.info("Dataset initialized with %d parquet files and %d rows",
                     len(self.parquet_files), sum(self.lengths))
@@ -416,6 +433,62 @@ def passthrough(batch):
     return batch
 
 
+def build_bot_died_excluded_indices(
+    data_path: str,
+    parquet_files: list[str],
+    lengths: list[int],
+) -> set[int]:
+    """Scan data_path dirs for ``../filter/bot_died.json`` relative to each
+    preprocessed directory.  When found, read the ``file_name`` column from
+    parquet files belonging to that directory and return global row indices
+    whose ``int(file_name)`` appears in the bot_died list.
+    """
+    import json
+
+    path_specs = _parse_data_path_specs(data_path)
+
+    bot_died_per_dir: dict[str, set[int]] = {}
+    for p, count in path_specs:
+        if count == 0:
+            continue
+        filter_path = os.path.join(os.path.dirname(p), "filter", "bot_died.json")
+        if os.path.exists(filter_path):
+            with open(filter_path) as f:
+                bot_died_per_dir[p] = set(json.load(f))
+            logger.info(
+                "Loaded bot_died filter from %s: %d entries to exclude",
+                filter_path, len(bot_died_per_dir[p]))
+
+    if not bot_died_per_dir:
+        return set()
+
+    excluded: set[int] = set()
+    global_offset = 0
+    for file_path, length in zip(parquet_files, lengths, strict=True):
+        matching_dir = None
+        for dir_path in bot_died_per_dir:
+            if file_path.startswith(dir_path):
+                matching_dir = dir_path
+                break
+
+        if matching_dir is not None:
+            bot_died_set = bot_died_per_dir[matching_dir]
+            try:
+                table = pq.read_table(file_path, columns=["file_name"])
+                file_names = table.column("file_name").to_pylist()
+                for local_idx, fn in enumerate(file_names):
+                    if int(str(fn).strip()) in bot_died_set:
+                        excluded.add(global_offset + local_idx)
+            except Exception as e:
+                logger.warning(
+                    "Failed to read file_name from %s for bot_died filter: %s",
+                    file_path, e)
+
+        global_offset += length
+
+    return excluded
+
+
 def build_parquet_map_style_dataloader(
         path,
         batch_size,
@@ -426,7 +499,9 @@ def build_parquet_map_style_dataloader(
         drop_first_row=False,
         reshuffle_each_epoch=False,
         text_padding_length=512,
-        seed=42) -> tuple[LatentsParquetMapStyleDataset, StatefulDataLoader]:
+        seed=42,
+        candidate_indices: list[int] | None = None
+) -> tuple[LatentsParquetMapStyleDataset, StatefulDataLoader]:
     dataset = LatentsParquetMapStyleDataset(
         path,
         batch_size,
@@ -436,7 +511,8 @@ def build_parquet_map_style_dataloader(
         reshuffle_each_epoch=reshuffle_each_epoch,
         text_padding_length=text_padding_length,
         parquet_schema=parquet_schema,
-        seed=seed)
+        seed=seed,
+        candidate_indices=candidate_indices)
 
     loader = StatefulDataLoader(
         dataset,

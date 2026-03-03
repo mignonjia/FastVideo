@@ -38,30 +38,36 @@ NUM_NODES=4
 NUM_TOTAL_GPUS=$((NUM_GPUS * NUM_NODES))
 BS_PER_GPU=1
 GRADIENT_ACCUMULATION_STEPS=1
-WANDB_RUN_NAME="MC_1action_rand_from_scratch"
+WANDB_RUN_NAME="1.3b-with-MC-prompt-filter-died"
 FREEZE_DIT=False
-RUN_DIR="wangame_1.3b_1action_rand_from_scratch"
+WANGAME_USE_TEXT_MODULE=True
+RUN_DIR="wangame_1.3b_mc_prompt_filter_died"
 CHECKPOINTING_STEPS=1000
 ACTION_WARMUP_STEPS=0
+BEST_CHECKPOINT_START_STEP=5000
+BEST_CHECKPOINT_SAVE_ALL_THRESHOLD=35
 LEARNING_RATE=1e-5
 
 MODEL_PATH="weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers"
-# CKPT_SAFETENSOR="wangame_1.3b_with_warmup_lr_1e-5/checkpoint-7000/transformer/diffusion_pytorch_model.safetensors"
-#
+CKPT_SAFETENSOR="wangame_1.3b_mc_prompt_0/checkpoint-5000/transformer/diffusion_pytorch_model.safetensors"
+
 # Data dirs (use one of the following):
 #   - DATA_DIR_ALL: all datasets below combined (comma-separated)
 #   - Or a single path / subset; optional ":N" = repeat, ":0" = skip
 #
 DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0204_2130/preprocessed:0" # Random
 DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0204_1600/preprocessed:0" # Doom
-DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/0_static_plus_w_only/preprocessed:1" # Static + w only
+DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/0_static_plus_w_only/preprocessed:0" # Static + w only
 DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed:1" # w/s/a/d only
 DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/preprocessed:1" # wasd only
 DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/camera/preprocessed:1" # camera l-only and r-only
 DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/camera4hold_alpha1/preprocessed:1" # camera only
 DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed:1" # key_camera_excl_1_action_rand
+DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/alex/wm-lab/datas/cache/zelda_overfit:0" # camera only
+DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/alex/wm-lab/datas/datasets/zeldam2/action_latent:0" # key_camera_excl_1_action_rand
 
-VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random.json"
+VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random_mc_prompt.json"
+
 #
 # Single-dir / validation alternatives (comment out DATA_DIR above and uncomment one block):
 # MC wasd only:
@@ -93,6 +99,7 @@ training_args=(
   --num_frames 77
   --enable_gradient_checkpointing_type "full"
   --train_action_only $FREEZE_DIT
+  --wangame_use_text_module $WANGAME_USE_TEXT_MODULE
   --action_warmup_steps $ACTION_WARMUP_STEPS
   # --resume_from_checkpoint $RESUME_FROM_CHECKPOINT
   # --init_weights_from_safetensors $CKPT_SAFETENSOR
@@ -125,7 +132,7 @@ validation_args=(
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
   --validation_steps 100
   --validation_sampling_steps "40"
-  --validation_guidance_scale "1.0"
+  --validation_guidance_scale "6.0"
   --validation_num_samples $NUM_TOTAL_GPUS
 )
 
@@ -136,6 +143,7 @@ optimizer_args=(
   --weight_only_checkpointing_steps 100000
   --training_state_checkpointing_steps $CHECKPOINTING_STEPS
   --best_checkpoint_start_step $BEST_CHECKPOINT_START_STEP
+  --best_checkpoint_save_all_threshold $BEST_CHECKPOINT_SAVE_ALL_THRESHOLD
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )

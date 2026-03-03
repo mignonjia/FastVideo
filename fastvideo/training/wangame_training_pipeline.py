@@ -31,9 +31,27 @@ class WanGameTrainingPipeline(TrainingPipeline):
     """
     A training pipeline for WanGame-2.1-Fun-1.3B-InP.
     """
-    _required_config_modules = ["scheduler", "transformer", "vae", "text_encoder", "tokenizer"]
+    _required_config_modules = ["scheduler", "transformer", "vae"]
     # Cached empty string embedding (computed once at initialization)
     _prompt_embedding: torch.Tensor | None = None
+
+    def __init__(
+        self,
+        model_path: str,
+        fastvideo_args: TrainingArgs,
+        required_config_modules: list[str] | None = None,
+        loaded_modules: dict[str, torch.nn.Module] | None = None,
+    ) -> None:
+        if required_config_modules is None:
+            required_config_modules = list(self._required_config_modules)
+            if fastvideo_args.wangame_use_text_module:
+                required_config_modules.extend(["text_encoder", "tokenizer"])
+        super().__init__(
+            model_path=model_path,
+            fastvideo_args=fastvideo_args,
+            required_config_modules=required_config_modules,
+            loaded_modules=loaded_modules,
+        )
 
     _FLOW_EVAL_SCALAR_KEYS = (
         "mf_epe_mean",
@@ -50,9 +68,16 @@ class WanGameTrainingPipeline(TrainingPipeline):
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         self.modules["scheduler"] = FlowUniPCMultistepScheduler(
             shift=fastvideo_args.pipeline_config.flow_shift)
-        
-        # Compute and cache the empty string embedding
-        self._compute_prompt_embedding(fastvideo_args)
+
+        # Compute and cache prompt embedding only when text module is enabled.
+        self._prompt_embedding = None
+        if fastvideo_args.wangame_use_text_module:
+            self._compute_prompt_embedding(fastvideo_args)
+        else:
+            logger.info(
+                "WanGame text module disabled "
+                "(--wangame-use-text-module=False); "
+                "training without text conditioning.")
 
 
     @torch.no_grad()
@@ -65,6 +90,11 @@ class WanGameTrainingPipeline(TrainingPipeline):
         
         tokenizer = self.get_module("tokenizer")
         text_encoder = self.get_module("text_encoder")
+        if tokenizer is None or text_encoder is None:
+            raise ValueError(
+                "WanGame text module is enabled, but tokenizer/text_encoder "
+                "is not loaded."
+            )
         
         # Get encoder config for tokenizer settings
         encoder_config = fastvideo_args.pipeline_config.text_encoder_configs[0]
@@ -203,6 +233,7 @@ class WanGameTrainingPipeline(TrainingPipeline):
             training_args.model_path,
             args=None,
             inference_mode=True,
+            wangame_use_text_module=training_args.wangame_use_text_module,
             loaded_modules={
                 "transformer": self.get_module("transformer"),
             },
@@ -235,13 +266,13 @@ class WanGameTrainingPipeline(TrainingPipeline):
 
         training_batch.latents = latents.to(get_local_torch_device(),
                                             dtype=torch.bfloat16)
-        # training_batch.encoder_hidden_states = None
-        # Use the pre-computed empty string embedding (true BOS token embedding)
-        # Expand to batch size: [1, seq_len, hidden_dim] -> [batch_size, seq_len, hidden_dim]
-        batch_size = latents.shape[0]
-        assert self._prompt_embedding is not None, "Prompt embedding not initialized"
-        training_batch.encoder_hidden_states = self._prompt_embedding.expand(
-            batch_size, -1, -1).to(get_local_torch_device())
+        if self._prompt_embedding is None:
+            training_batch.encoder_hidden_states = None
+        else:
+            # Expand [1, seq_len, hidden_dim] -> [batch_size, seq_len, hidden_dim]
+            batch_size = latents.shape[0]
+            training_batch.encoder_hidden_states = self._prompt_embedding.expand(
+                batch_size, -1, -1).to(get_local_torch_device())
         training_batch.encoder_attention_mask = None
         training_batch.preprocessed_image = pil_image.to(
             get_local_torch_device())
@@ -382,6 +413,9 @@ class WanGameTrainingPipeline(TrainingPipeline):
             'image_path') or validation_batch.get('video_path')
         sampling_param.num_inference_steps = num_inference_steps
         sampling_param.data_type = "video"
+        if training_args.validation_guidance_scale:
+            sampling_param.guidance_scale = float(
+                training_args.validation_guidance_scale)
         assert self.seed is not None
         sampling_param.seed = self.seed
 

@@ -161,6 +161,10 @@ class FastVideoArgs:
     # Stage verification
     enable_stage_verification: bool = True
 
+    # WanGame-specific: whether to load/use text module.
+    # Set False to keep compatibility with no-text checkpoints.
+    wangame_use_text_module: bool = True
+
     # Prompt text file for batch processing
     prompt_txt: str | None = None
 
@@ -555,6 +559,13 @@ class FastVideoArgs:
             action=StoreBoolean,
             default=FastVideoArgs.enable_stage_verification,
             help="Enable input/output verification for pipeline stages",
+        )
+        parser.add_argument(
+            "--wangame-use-text-module",
+            action=StoreBoolean,
+            default=FastVideoArgs.wangame_use_text_module,
+            help=
+            "Enable text encoder/tokenizer conditioning in WanGame pipelines.",
         )
         parser.add_argument(
             "--override-text-encoder-safetensors",

@@ -18,12 +18,10 @@ class WanGameActionTimeImageEmbedding(nn.Module):
         self,
         dim: int,
         time_freq_dim: int,
-        text_embed_dim: int,
         image_embed_dim: int | None = None,
     ):
         super().__init__()
 
-        self.dim = dim
         self.time_freq_dim = time_freq_dim
         self.time_embedder = TimestepEmbedder(
             dim, frequency_embedding_size=time_freq_dim, act_layer="silu")
@@ -34,12 +32,6 @@ class WanGameActionTimeImageEmbedding(nn.Module):
         self.image_embedder = None
         if image_embed_dim is not None:
             self.image_embedder = WanImageEmbedding(image_embed_dim, dim)
-
-        self.text_embedder = MLP(text_embed_dim,
-                                 dim,
-                                 dim,
-                                 bias=True,
-                                 act_type="gelu_pytorch_tanh") if text_embed_dim > 0 else None
 
         self.action_embedder = MLP(
             time_freq_dim,
@@ -94,10 +86,15 @@ class WanGameActionTimeImageEmbedding(nn.Module):
             action_emb = action_emb.to(action_embedder_dtype)
         action_emb = self.action_embedder(action_emb).type_as(temb)  # [B*T, dim]
         
-        # Expand temb to match action_emb: [B, dim] -> [B, T, dim] -> [B*T, dim]
-        # Each batch's temb is repeated for all its frames
-        temb_expanded = temb.unsqueeze(1).expand(-1, num_frames, -1)  # [B, T, dim]
-        temb_expanded = temb_expanded.reshape(batch_size * num_frames, -1)  # [B*T, dim]
+        # timestep may be per-sample [B] or already per-frame [B*T].
+        # Only expand when it is per-sample.
+        if temb.shape[0] == batch_size and num_frames > 1:
+            temb_expanded = temb.unsqueeze(1).expand(-1, num_frames,
+                                                     -1)  # [B, T, dim]
+            temb_expanded = temb_expanded.reshape(batch_size * num_frames,
+                                                  -1)  # [B*T, dim]
+        else:
+            temb_expanded = temb
         
         # Add action embedding to expanded temb
         temb = temb_expanded + action_emb  # [B*T, dim]
@@ -106,12 +103,10 @@ class WanGameActionTimeImageEmbedding(nn.Module):
 
         # MatrixGame does not use text embeddings, so we ignore encoder_hidden_states
         
-        if self.text_embedder is not None and encoder_hidden_states is not None:
-            encoder_hidden_states = self.text_embedder(encoder_hidden_states)
-        else:
-            encoder_hidden_states = torch.zeros((batch_size, 0, temb.shape[-1]),
-                                                device=temb.device,
-                                                dtype=temb.dtype)
+        # Keep Wangame in no-text mode: always pass empty text tokens.
+        encoder_hidden_states = torch.zeros((batch_size, 0, temb.shape[-1]),
+                                            device=temb.device,
+                                            dtype=temb.dtype)
 
         if encoder_hidden_states_image is not None:
             assert self.image_embedder is not None
@@ -179,7 +174,8 @@ class WanGameActionSelfAttention(nn.Module):
             viewmats: Camera view matrices for PRoPE [B, cameras, 4, 4]
             Ks: Camera intrinsics for PRoPE [B, cameras, 3, 3]
             is_cache: Whether to store to KV cache (for inference)
-            attention_mask: Attention mask [B, L] (1 = attend, 0 = mask)
+            attention_mask: Optional attention mask for metadata build. Accepts
+                [B, L] or [2B, L] where B is query batch size.
         """
         if cache_start is None:
             cache_start = current_start
@@ -264,11 +260,27 @@ class WanGameActionSelfAttention(nn.Module):
             hidden_states_all = self._kv_cache_attn(query_all, key_all, value_all)
         else:
             # Same sequence length: use DistributedAttention (supports SP)
-            # Create default attention mask if not provided
-            # NOTE: query_all has shape [2*B, L, ...] (rope+prope concatenated), so mask needs 2*B
+            # Keep full sequence length for Wangame to avoid trimming tail tokens.
+            batch_size, seq_len = q.shape[0], q.shape[1]
+
             if attention_mask is None:
-                batch_size, seq_len = q.shape[0], q.shape[1]
-                attention_mask = torch.ones(batch_size * 2, seq_len, device=q.device, dtype=q.dtype)
+                attention_mask = torch.ones(batch_size * 2,
+                                            seq_len,
+                                            device=q.device,
+                                            dtype=q.dtype)
+            else:
+                if attention_mask.dim() != 2:
+                    raise ValueError(
+                        f"attention_mask must be 2D, got shape={attention_mask.shape}"
+                    )
+                if attention_mask.shape[0] == batch_size:
+                    attention_mask = torch.cat([attention_mask, attention_mask],
+                                               dim=0)
+                elif attention_mask.shape[0] != batch_size * 2:
+                    raise ValueError(
+                        "attention_mask batch dim must be B or 2B for "
+                        f"query batch B={batch_size}, got {attention_mask.shape[0]}"
+                    )
         
             if q.dtype == torch.float32:
                 from fastvideo.attention.backends.sdpa import SDPAMetadataBuilder
@@ -281,7 +293,12 @@ class WanGameActionSelfAttention(nn.Module):
                 attn_mask=attention_mask,
             )
             with set_forward_context(current_timestep=0, attn_metadata=attn_metadata):
-                hidden_states_all, _ = self.attn(query_all, key_all, value_all, attention_mask=attention_mask)
+                hidden_states_all, _ = self.attn(
+                    query_all,
+                    key_all,
+                    value_all,
+                    original_seq_len=seq_len,
+                )
 
         hidden_states_rope, hidden_states_prope = hidden_states_all.chunk(2, dim=0)
         

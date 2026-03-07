@@ -829,6 +829,7 @@ class TrainingArgs(FastVideoArgs):
     validation_steps: float = 0.0
     validation_num_samples: int | None = None  # Limit number of validation samples (None = use all)
     log_validation: bool = False
+    val_only: bool = False
     trackers: list[str] = dataclasses.field(default_factory=list)
     tracker_project_name: str = ""
     wandb_run_name: str = ""
@@ -918,7 +919,7 @@ class TrainingArgs(FastVideoArgs):
     training_state_checkpointing_steps: int = 0  # for resuming training
     weight_only_checkpointing_steps: int = 0  # for inference
     best_checkpoint_start_step: int = 0  # save best checkpoint (by mf_angle_err_mean) after this step; 0 = disabled
-    best_checkpoint_save_all_threshold: float = 0.0  # also save every checkpoint where metric < this value; 0 = disabled
+    best_checkpoint_top_k: int = 1  # keep at most top-k best checkpoints by mf_angle_err_mean
     log_visualization: bool = False
     visualization_steps: int = 0
     # simulate generator forward to match inference
@@ -1091,6 +1092,11 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--log-validation",
                             action=StoreBoolean,
                             help="Whether to log validation results")
+        parser.add_argument(
+            "--val-only",
+            action=StoreBoolean,
+            help=
+            "Run validation-only and exit before optimizer/training steps.")
         parser.add_argument("--visualization-steps",
                             type=int,
                             help="Number of visualization steps")
@@ -1128,10 +1134,9 @@ class TrainingArgs(FastVideoArgs):
             help="Save best checkpoint (by mf_angle_err_mean) after this "
             "step; 0 = disabled")
         parser.add_argument(
-            "--best-checkpoint-save-all-threshold",
-            type=float,
-            help="Save a checkpoint every time the metric is below "
-            "this value; 0 = disabled")
+            "--best-checkpoint-top-k",
+            type=int,
+            help="Keep at most top-k best checkpoints (by mf_angle_err_mean)")
         parser.add_argument("--resume-from-checkpoint",
                             type=str,
                             help="Path to checkpoint to resume from")

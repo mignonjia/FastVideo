@@ -42,6 +42,8 @@ WANDB_RUN_NAME="MC_1action_rand_from_scratch"
 FREEZE_DIT=False
 RUN_DIR="wangame_1.3b_1action_rand_from_scratch"
 CHECKPOINTING_STEPS=1000
+BEST_CHECKPOINT_START_STEP=5000
+BEST_CHECKPOINT_TOP_K=3
 ACTION_WARMUP_STEPS=0
 LEARNING_RATE=1e-5
 
@@ -92,7 +94,7 @@ training_args=(
   --num_height 352
   --num_width 640
   --num_frames 77
-  --enable_gradient_checkpointing_type "full"
+  # --enable_gradient_checkpointing_type "full"
   --train_action_only $FREEZE_DIT
   --action_warmup_steps $ACTION_WARMUP_STEPS
   # --resume_from_checkpoint $RESUME_FROM_CHECKPOINT
@@ -138,6 +140,7 @@ optimizer_args=(
   --weight_only_checkpointing_steps 100000
   --training_state_checkpointing_steps $CHECKPOINTING_STEPS
   --best_checkpoint_start_step $BEST_CHECKPOINT_START_STEP
+  --best_checkpoint_top_k $BEST_CHECKPOINT_TOP_K
   --weight_decay 1e-4
   --max_grad_norm 1.0
 )
@@ -145,7 +148,6 @@ optimizer_args=(
 # Miscellaneous arguments
 miscellaneous_args=(
   --inference_mode False
-  --checkpoints_total_limit 2
   --training_cfg_rate 0.1
   --multi_phased_distill_schedule "4000-1"
   --not_apply_cfg_solver

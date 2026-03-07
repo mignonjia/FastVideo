@@ -31,14 +31,15 @@ def _extract_step_from_checkpoint_path(checkpoint_path: str) -> int:
 
     Supports:
     1. A checkpoint directory named `checkpoint-<int>`
-    2. A checkpoint directory named `checkpoint-best` with `best_metric.json`
+    2. A checkpoint directory named `checkpoint-best` or
+       `checkpoint-best-*` with `best_metric.json`
     """
     checkpoint_name = os.path.basename(os.path.normpath(checkpoint_path))
     if checkpoint_name.startswith("checkpoint-"):
         step_str = checkpoint_name.split("checkpoint-", maxsplit=1)[-1]
         if step_str.isdigit():
             return int(step_str)
-        if step_str == "best":
+        if step_str.startswith("best"):
             best_metric_path = os.path.join(checkpoint_path, "best_metric.json")
             if os.path.isfile(best_metric_path):
                 with open(best_metric_path) as f:

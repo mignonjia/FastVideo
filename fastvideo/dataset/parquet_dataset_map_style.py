@@ -523,7 +523,7 @@ def build_bot_died_excluded_indices(
     for p, count in path_specs:
         if count == 0:
             continue
-        filter_path = os.path.join(os.path.dirname(p), "filter", "bot_died.json")
+        filter_path = os.path.join(os.path.dirname(p), "filter", "blue_water_random_half.json")
         if os.path.exists(filter_path):
             with open(filter_path) as f:
                 bot_died_per_dir[p] = set(json.load(f))

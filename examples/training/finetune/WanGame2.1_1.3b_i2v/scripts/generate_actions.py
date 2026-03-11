@@ -3,13 +3,13 @@ import numpy as np
 
 # Configuration
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-BASE_OUTPUT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "actions_81"))
+BASE_OUTPUT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "actions"))
 VIDEO_OUTPUT_DIR = BASE_OUTPUT_DIR
 
 os.makedirs(VIDEO_OUTPUT_DIR, exist_ok=True)
 
 CAM_VALUE = 0.1
-FRAME_COUNT = 80
+FRAME_COUNT = 76
 
 # Action Mapping
 KEY_TO_INDEX = {
@@ -78,6 +78,24 @@ def save_action(filename, keyboard_arr, mouse_arr):
 
 def build_constant_sequence(value):
     return [value] * FRAME_COUNT
+
+
+def build_phase_sequence(phases):
+    """
+    Build sequence from (action, num_frames) phases.
+    Remaining frames are padded as still ("").
+    """
+    sequence = []
+    for action, length in phases:
+        if length < 0:
+            raise ValueError("phase length must be non-negative")
+        sequence.extend([action] * length)
+
+    if len(sequence) > FRAME_COUNT:
+        raise ValueError("phase sequence is longer than FRAME_COUNT")
+
+    sequence.extend([""] * (FRAME_COUNT - len(sequence)))
+    return sequence
 
 
 def build_random_sequence(actions, granularity, rng):
@@ -162,6 +180,56 @@ if __name__ == "__main__":
 
     # Group 3: Still. still.npy
     configs.append(("still", build_constant_sequence(""), build_constant_sequence("")))
+
+    # Group 3b: Scripted transitions with fixed timing template.
+    # Note: generate_sequence prepends a duplicate frame 0. So we use 4
+    # initial still frames here to get 5 still frames in saved output.
+    # still(5 effective) -> action1(28) -> still(4) -> action2(28) -> still(rest)
+    keyboard_transitions = [
+        ("W", "S"),
+        ("S", "W"),
+        ("A", "D"),
+        ("D", "A"),
+    ]
+    for action1, action2 in keyboard_transitions:
+        configs.append(
+            (
+                f"still5_{action1}28_still4_{action2}28_still",
+                build_phase_sequence(
+                    [("", 4), (action1, 28), ("", 4), (action2, 28)]
+                ),
+                build_constant_sequence(""),
+            )
+        )
+
+    # Single-direction hold: still(5 effective) then S for all remaining frames.
+    configs.append(
+        (
+            "still5_S_rest",
+            build_phase_sequence([("", 4), ("S", FRAME_COUNT - 4)]),
+            build_constant_sequence(""),
+        )
+    )
+
+    mouse_transitions = [
+        ("up", "down"),
+        ("down", "up"),
+        ("left", "right"),
+        ("right", "left"),
+    ]
+    for action1, action2 in mouse_transitions:
+        configs.append(
+            (
+                "still5_"
+                f"{mouse_short_name(action1)}28_"
+                "still4_"
+                f"{mouse_short_name(action2)}28_still",
+                build_constant_sequence(""),
+                build_phase_sequence(
+                    [("", 4), (action1, 28), ("", 4), (action2, 28)]
+                ),
+            )
+        )
 
     # Group 4: Constant key + camera. W_u.npy, SA_dl.npy, ...
     for key in keys_basic:

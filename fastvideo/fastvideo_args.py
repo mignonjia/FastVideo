@@ -870,8 +870,8 @@ class TrainingArgs(FastVideoArgs):
     linear_quadratic_threshold: float = 0.0
     linear_range: float = 0.0
     weight_decay: float = 0.0
-    betas: str = "0.9,0.999"  # betas for optimizer, format: "beta1,beta2"
-    use_ema: bool = False
+    betas: str = "0.9,0.95"  # betas for optimizer, format: "beta1,beta2"
+    use_ema: bool = False # only used for distillation
     multi_phased_distill_schedule: str = ""
     pred_decay_weight: float = 0.0
     pred_decay_type: str = ""
@@ -910,7 +910,7 @@ class TrainingArgs(FastVideoArgs):
     # distillation args
     generator_update_interval: int = 5
     dfake_gen_update_ratio: int = 5  # self-forcing: how often to train generator vs critic
-    min_timestep_ratio: float = 0.2
+    min_timestep_ratio: float = 0.02
     max_timestep_ratio: float = 0.98
     real_score_guidance_scale: float = 3.5
     fake_score_learning_rate: float = 0.0  # separate learning rate for fake_score_transformer, if 0.0, use learning_rate
@@ -1056,7 +1056,7 @@ class TrainingArgs(FastVideoArgs):
         # Diffusion settings
         parser.add_argument("--ema-decay",
                             type=float,
-                            default=0.999,
+                            default=0.9999,
                             help="EMA decay rate")
         parser.add_argument("--ema-start-step",
                             type=int,

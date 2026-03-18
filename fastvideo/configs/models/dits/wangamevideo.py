@@ -11,6 +11,8 @@ from fastvideo.configs.models.dits.wanvideo import (
 class WanGameVideoArchConfig(WanVideoArchConfig):
     """Wangame keeps WanVideo architecture defaults and checkpoint mappings."""
 
+    keyboard_dim_in: int = 4
+
 
 @dataclass
 class WanGameVideoConfig(WanVideoConfig):

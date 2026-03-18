@@ -272,6 +272,7 @@ class WanGameActionTransformer3DModel(BaseDiT):
         self.condition_embedder = WanGameActionTimeImageEmbedding(
             dim=inner_dim,
             time_freq_dim=config.freq_dim,
+            action_input_dim=int(config.keyboard_dim_in) + 2,
             image_embed_dim=config.image_dim,
         )
 
@@ -336,7 +337,7 @@ class WanGameActionTransformer3DModel(BaseDiT):
             encoder_hidden_states: Text embeddings [B, L, D]
             timestep: Timestep tensor
             encoder_hidden_states_image: Optional image embeddings
-            action: Action tensor [B, T] for per-frame conditioning
+            action: Action tensor [B, T, A] for per-frame conditioning
             viewmats: Camera view matrices for PRoPE [B, T, 4, 4]
             Ks: Camera intrinsics for PRoPE [B, T, 3, 3]
             kv_cache: KV cache for autoregressive inference (list of dicts per layer)

@@ -659,34 +659,41 @@ class WanGameModel(ModelBase):
         from fastvideo.models.dits.hyworld.pose import (
             process_custom_actions, )
 
+        transformer_config = self.transformer.config
+        expected_action_dim = int(transformer_config.keyboard_dim_in) + 2
+
         batch_size = int(training_batch.noisy_model_input.shape[0]  # type: ignore[union-attr]
                          )
         viewmats_list: list[torch.Tensor] = []
         intrinsics_list: list[torch.Tensor] = []
-        action_labels_list: list[torch.Tensor] = []
+        action_vectors_list: list[torch.Tensor] = []
         for b in range(batch_size):
             v, i, a = process_custom_actions(keyboard_cond[b], mouse_cond[b])
             viewmats_list.append(v)
             intrinsics_list.append(i)
-            action_labels_list.append(a)
+            action_vectors_list.append(a)
 
         viewmats = torch.stack(viewmats_list, dim=0).to(device=self.device, dtype=torch.bfloat16)
         intrinsics = torch.stack(intrinsics_list, dim=0).to(device=self.device, dtype=torch.bfloat16)
-        action_labels = torch.stack(action_labels_list, dim=0).to(device=self.device, dtype=torch.bfloat16)
+        action_vectors = torch.stack(action_vectors_list, dim=0).to(device=self.device, dtype=torch.bfloat16)
 
         num_latent_t = int(training_batch.noisy_model_input.shape[2]  # type: ignore[union-attr]
                            )
-        if int(action_labels.shape[1]) != num_latent_t:
+        if int(action_vectors.shape[1]) != num_latent_t:
             raise ValueError("Action conditioning temporal dim "
                              "mismatch: "
-                             f"action={tuple(action_labels.shape)} "
+                             f"action={tuple(action_vectors.shape)} "
                              f"vs latent_t={num_latent_t}")
+        if int(action_vectors.shape[2]) != expected_action_dim:
+            raise ValueError("Action conditioning feature dim mismatch: "
+                             f"action={tuple(action_vectors.shape)} "
+                             f"vs expected_action_dim={expected_action_dim}")
         if int(viewmats.shape[1]) != num_latent_t:
             raise ValueError("Viewmats temporal dim mismatch: "
                              f"viewmats={tuple(viewmats.shape)} "
                              f"vs latent_t={num_latent_t}")
 
-        return viewmats, intrinsics, action_labels
+        return viewmats, intrinsics, action_vectors
 
     def _build_distill_input_kwargs(
         self,

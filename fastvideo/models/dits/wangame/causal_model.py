@@ -557,6 +557,7 @@ class CausalWanGameActionTransformer3DModel(BaseDiT):
         self.condition_embedder = WanGameActionTimeImageEmbedding(
             dim=inner_dim,
             time_freq_dim=config.freq_dim,
+            action_input_dim=int(config.keyboard_dim_in) + 2,
             image_embed_dim=config.image_dim,
         )
 

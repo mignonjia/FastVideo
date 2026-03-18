@@ -4,7 +4,7 @@
 Pose processing utilities for HYWorld video generation.
 
 This module provides functions to convert camera poses to model input tensors,
-including viewmats, intrinsics, and action labels.
+including viewmats, intrinsics, and action conditioning.
 
 Adapted from HY-WorldPlay: https://github.com/Tencent-Hunyuan/HY-WorldPlay
 """
@@ -20,6 +20,8 @@ from .trajectory import generate_camera_trajectory_local
 
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_WASD_INDICES = (0, 1, 2, 3)
 
 
 # Mapping from one-hot action encoding to single label
@@ -338,10 +340,32 @@ def reformat_keyboard_and_mouse_tensors(
     return keyboard_tensor[::4], mouse_tensor[::4]
 
 
+def _normalize_wasd_indices(
+    wasd_indices: tuple[int, int, int, int] | list[int],
+    keyboard_dim: int,
+) -> tuple[int, int, int, int]:
+    if len(wasd_indices) != 4:
+        raise ValueError(
+            f"wasd_indices must contain 4 entries, got {len(wasd_indices)}"
+        )
+    normalized = tuple(int(index) for index in wasd_indices)
+    if len(set(normalized)) != 4:
+        raise ValueError(
+            f"wasd_indices must be unique, got {normalized}"
+        )
+    for index in normalized:
+        if index < 0 or index >= keyboard_dim:
+            raise ValueError(
+                f"wasd index {index} is out of bounds for keyboard_dim={keyboard_dim}"
+            )
+    return normalized
+
+
 def process_custom_actions(
     keyboard_tensor: torch.Tensor,
     mouse_tensor: torch.Tensor,
     forward_speed: float = DEFAULT_FORWARD_SPEED,
+    wasd_indices: tuple[int, int, int, int] | list[int] = DEFAULT_WASD_INDICES,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Convert custom keyboard/mouse controls into viewmats, intrinsics, and labels.
@@ -354,23 +378,27 @@ def process_custom_actions(
     keyboard_tensor, mouse_tensor = reformat_keyboard_and_mouse_tensors(
         keyboard_tensor, mouse_tensor
     )
+    w_idx, s_idx, a_idx, d_idx = _normalize_wasd_indices(
+        wasd_indices,
+        keyboard_dim=int(keyboard_tensor.shape[-1]),
+    )
 
     motions: list[dict[str, float]] = []
     for t in range(keyboard_tensor.shape[0]):
         frame_motion: dict[str, float] = {}
 
         fwd = 0.0
-        if keyboard_tensor[t, 0] > 0.5:
+        if keyboard_tensor[t, w_idx] > 0.5:
             fwd += forward_speed
-        if keyboard_tensor[t, 1] > 0.5:
+        if keyboard_tensor[t, s_idx] > 0.5:
             fwd -= forward_speed
         if fwd != 0.0:
             frame_motion["forward"] = fwd
 
         rgt = 0.0
-        if keyboard_tensor[t, 2] > 0.5:
+        if keyboard_tensor[t, a_idx] > 0.5:
             rgt -= forward_speed
-        if keyboard_tensor[t, 3] > 0.5:
+        if keyboard_tensor[t, d_idx] > 0.5:
             rgt += forward_speed
         if rgt != 0.0:
             frame_motion["right"] = rgt
@@ -403,56 +431,17 @@ def process_custom_actions(
     viewmats = torch.as_tensor(np.array(w2c_list))
     intrinsics = torch.as_tensor(np.array(intrinsic_list))
 
-    c2ws = np.linalg.inv(np.array(w2c_list))
-    c_inv = np.linalg.inv(c2ws[:-1])
-    relative_c2w = np.zeros_like(c2ws)
-    relative_c2w[0, ...] = c2ws[0, ...]
-    relative_c2w[1:, ...] = c_inv @ c2ws[1:, ...]
-
-    trans_one_hot = np.zeros((relative_c2w.shape[0], 4), dtype=np.int32)
-    rotate_one_hot = np.zeros((relative_c2w.shape[0], 4), dtype=np.int32)
-    move_norm_valid = 0.0001
-
-    for i in range(1, relative_c2w.shape[0]):
-        move_dirs = relative_c2w[i, :3, 3]
-        move_norms = np.linalg.norm(move_dirs)
-
-        if move_norms > move_norm_valid:
-            move_norm_dirs = move_dirs / move_norms
-            angles_rad = np.arccos(move_norm_dirs.clip(-1.0, 1.0))
-            trans_angles_deg = angles_rad * (180.0 / np.pi)
-        else:
-            trans_angles_deg = np.zeros(3)
-
-        r_rel = relative_c2w[i, :3, :3]
-        rot_angles_deg = R.from_matrix(r_rel).as_euler("xyz", degrees=True)
-
-        if move_norms > move_norm_valid:
-            if trans_angles_deg[2] < 60:
-                trans_one_hot[i, 0] = 1
-            elif trans_angles_deg[2] > 120:
-                trans_one_hot[i, 1] = 1
-
-            if trans_angles_deg[0] < 60:
-                trans_one_hot[i, 2] = 1
-            elif trans_angles_deg[0] > 120:
-                trans_one_hot[i, 3] = 1
-
-        if rot_angles_deg[1] > 5e-2:
-            rotate_one_hot[i, 0] = 1
-        elif rot_angles_deg[1] < -5e-2:
-            rotate_one_hot[i, 1] = 1
-
-        if rot_angles_deg[0] > 5e-2:
-            rotate_one_hot[i, 2] = 1
-        elif rot_angles_deg[0] < -5e-2:
-            rotate_one_hot[i, 3] = 1
-
-    trans_label = one_hot_to_one_dimension(torch.tensor(trans_one_hot))
-    rotate_label = one_hot_to_one_dimension(torch.tensor(rotate_one_hot))
-    action_labels = trans_label * 9 + rotate_label
-
-    return viewmats, intrinsics, action_labels
+    latent_keyboard = keyboard_tensor.to(dtype=torch.float32)
+    latent_camera = mouse_tensor.to(device=latent_keyboard.device,
+                                    dtype=torch.float32)
+    latent_action = torch.cat([latent_keyboard, latent_camera], dim=-1)
+    action_vectors = torch.zeros(
+        (viewmats.shape[0], latent_action.shape[-1]),
+        dtype=latent_action.dtype,
+        device=latent_action.device,
+    )
+    action_vectors[1:] = latent_action
+    return viewmats, intrinsics, action_vectors
 
 
 

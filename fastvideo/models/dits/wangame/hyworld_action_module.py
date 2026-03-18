@@ -18,11 +18,13 @@ class WanGameActionTimeImageEmbedding(nn.Module):
         self,
         dim: int,
         time_freq_dim: int,
+        action_input_dim: int,
         image_embed_dim: int | None = None,
     ):
         super().__init__()
 
         self.time_freq_dim = time_freq_dim
+        self.action_input_dim = action_input_dim
         self.time_embedder = TimestepEmbedder(
             dim, frequency_embedding_size=time_freq_dim, act_layer="silu")
         self.time_modulation = ModulateProjection(dim,
@@ -34,7 +36,7 @@ class WanGameActionTimeImageEmbedding(nn.Module):
             self.image_embedder = WanImageEmbedding(image_embed_dim, dim)
 
         self.action_embedder = MLP(
-            time_freq_dim,
+            action_input_dim,
             dim,
             dim,
             bias=True,
@@ -58,30 +60,37 @@ class WanGameActionTimeImageEmbedding(nn.Module):
         """
         Args:
             timestep: [B] diffusion timesteps (one per batch sample)
-            action: [B, T] action labels (one per frame per batch sample)
+            action: [B, T, A] action vectors (one per frame per batch sample)
         
         Returns:
             temb: [B*T, dim] combined timestep + action embedding
             timestep_proj: [B*T, 6*dim] modulation projection
         """
+        if action is None:
+            raise ValueError("WanGameActionTimeImageEmbedding requires action input")
+        if action.ndim != 3:
+            raise ValueError(
+                f"Expected action to have shape [B, T, A], got {tuple(action.shape)}"
+            )
         # timestep may be [B] (one per sample) or [B*T] (one per frame, from causal training)
         temb = self.time_embedder(timestep, timestep_seq_len)
         
-        # Handle action embedding for batch > 1
-        # action shape: [B, T] where B=batch_size, T=num_frames
         batch_size = action.shape[0]
         num_frames = action.shape[1]
+        if action.shape[2] != self.action_input_dim:
+            raise ValueError(
+                "Action feature dim mismatch: "
+                f"got {action.shape[2]}, expected {self.action_input_dim}"
+            )
         
-        # Compute action embeddings: [B, T] -> [B*T] -> [B*T, dim]
-        action_flat = action.flatten()  # [B*T]
-        action_emb = timestep_embedding(action_flat, self.time_freq_dim)
+        action_flat = action.reshape(batch_size * num_frames, self.action_input_dim)
         action_embedder_dtype = next(iter(self.action_embedder.parameters())).dtype
         if (
-            action_emb.dtype != action_embedder_dtype
+            action_flat.dtype != action_embedder_dtype
             and action_embedder_dtype != torch.int8
         ):
-            action_emb = action_emb.to(action_embedder_dtype)
-        action_emb = self.action_embedder(action_emb).type_as(temb)  # [B*T, dim]
+            action_flat = action_flat.to(action_embedder_dtype)
+        action_emb = self.action_embedder(action_flat).type_as(temb)  # [B*T, dim]
         
         # temb is [B*T, dim] when timestep was already per-frame (causal training),
         # or [B, dim] when timestep is per-sample (inference).

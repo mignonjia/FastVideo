@@ -46,10 +46,47 @@ def _looks_like_matrixgame_transformer_checkpoint(
 ) -> bool:
     for safetensors_path in safetensors_list:
         with safe_open(safetensors_path, framework="pt", device="cpu") as f:
+            has_matrixgame_action_module = False
+            has_matrixgame_cross_attn = False
+            has_wangame_image_proj = False
             for key in f.keys():
                 if ".action_model." in key:
-                    return True
+                    has_matrixgame_action_module = True
+                elif ".attn2.to_k." in key or ".attn2.to_v." in key:
+                    has_matrixgame_cross_attn = True
+                elif (".attn2.add_k_proj." in key
+                      or ".attn2.add_v_proj." in key
+                      or ".attn2.norm_added_k." in key
+                      or ".attn2.norm_added_q." in key):
+                    has_wangame_image_proj = True
+            if has_matrixgame_action_module:
+                return True
+            if has_matrixgame_cross_attn and not has_wangame_image_proj:
+                return True
     return False
+
+
+def _maybe_switch_wangame_to_matrixgame_mode(
+    dit_config,
+    hf_config: dict[str, object],
+    safetensors_list: list[str],
+    *,
+    reason: str,
+) -> None:
+    arch_config = getattr(dit_config, "arch_config", None)
+    if (arch_config is None or not hasattr(arch_config, "image_cross_attn_type")
+            or arch_config.image_cross_attn_type != "wangame"):
+        return
+    if not _looks_like_matrixgame_transformer_checkpoint(safetensors_list):
+        return
+
+    arch_config.image_cross_attn_type = "matrixgame"
+    hf_config["image_cross_attn_type"] = "matrixgame"
+    logger.info(
+        "Detected MatrixGame-style Wangame checkpoint during %s; "
+        "switching image cross-attention to matrixgame mode.",
+        reason,
+    )
 
 
 class ComponentLoader(ABC):
@@ -807,6 +844,13 @@ class TransformerLoader(ComponentLoader):
         if not safetensors_list:
             raise ValueError(f"No safetensors files found in {model_path}")
 
+        _maybe_switch_wangame_to_matrixgame_mode(
+            dit_config,
+            hf_config,
+            safetensors_list,
+            reason="checkpoint load",
+        )
+
         # Check if we should use custom initialization weights
         custom_weights_path = getattr(
             fastvideo_args, "init_weights_from_safetensors", None
@@ -835,16 +879,12 @@ class TransformerLoader(ComponentLoader):
                 )
                 safetensors_list = [custom_weights_path]
 
-            arch_config = getattr(dit_config, "arch_config", None)
-            if (arch_config is not None
-                    and hasattr(arch_config, "image_cross_attn_type")
-                    and arch_config.image_cross_attn_type == "wangame"
-                    and _looks_like_matrixgame_transformer_checkpoint(
-                        safetensors_list)):
-                arch_config.image_cross_attn_type = "matrixgame"
-                logger.info(
-                    "Detected MatrixGame-style init checkpoint; switching Wangame image cross-attention to matrixgame mode."
-                )
+            _maybe_switch_wangame_to_matrixgame_mode(
+                dit_config,
+                hf_config,
+                safetensors_list,
+                reason="custom init",
+            )
 
         logger.info(
             "Loading model from %s safetensors files: %s",

@@ -38,37 +38,38 @@ NUM_NODES=4
 NUM_TOTAL_GPUS=$((NUM_GPUS * NUM_NODES))
 BS_PER_GPU=1
 GRADIENT_ACCUMULATION_STEPS=1
-WANDB_RUN_NAME="Zelda_MC_no_action"
+WANDB_RUN_NAME="Zelda_with_warmup_ckpt"
 FREEZE_DIT=False
-RUN_DIR="wangame_1.3b_zelda_with_MC_init"
+RUN_DIR="wangame_1.3b_zelda_with_warmup_ckpt"
 CHECKPOINTING_STEPS=4000
-CHECKPOINT_START_STEP=0
-BEST_CHECKPOINT_TOP_K=0
-ACTION_WARMUP_STEPS=20000
+CHECKPOINT_START_STEP=1
+BEST_CHECKPOINT_TOP_K=5
+ACTION_WARMUP_STEPS=0
 LEARNING_RATE=2e-5
 SEED=1000
 DMD_DENOISING_STEPS="1000,750,500,250,0"
 VAL_ONLY=False
 
 MODEL_PATH="weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers"
-CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/kaiqin/mg_models/Matrix-Game-2.0-Base-Diffusers/transformer/diffusion_pytorch_model.safetensors"
+# CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/kaiqin/mg_models/Matrix-Game-2.0-Base-Diffusers/transformer/diffusion_pytorch_model.safetensors" 
+CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/wangame_1.3b_zelda_with_MC_init/checkpoint-20000/transformer/diffusion_pytorch_model.safetensors"
 # CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/wangame_1.3b_long_run/checkpoint-best-step-61500/transformer/diffusion_pytorch_model.safetensors"
 
 # Data dirs (use one of the following):
 #   - DATA_DIR_ALL: all datasets below combined (comma-separated)
 #   - Or a single path / subset; optional ":N" = repeat, ":0" = skip
 #
-DATA_DIR="/mnt/weka/home/hao.zhang/alex/wm-lab/datas/datasets/zeldam2:1" # Zelda
-DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0204_2130/preprocessed:1" # Random
-DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0204_1600/preprocessed:0" # Doom
-DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/0_static_plus_w_only/preprocessed:3" # Static + w only
-DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed:3" # w/s/a/d only
-DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/preprocessed:3" # wasd only
-DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/camera/preprocessed:3" # camera l-only and r-only
-DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/camera4hold_alpha1/preprocessed:3" # camera only
-DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed:3" # key_camera_excl_1_action_rand
+DATA_DIR="/mnt/weka/home/hao.zhang/alex/wm-lab/datas/datasets/zeldam2-v2:1" # Zelda
+# DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0204_2130/preprocessed:1" # Random
+# DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0204_1600/preprocessed:0" # Doom
+# DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/0_static_plus_w_only/preprocessed:3" # Static + w only
+# DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed:3" # w/s/a/d only
+# DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/preprocessed:3" # wasd only
+# DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/camera/preprocessed:3" # camera l-only and r-only
+# DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/camera4hold_alpha1/preprocessed:3" # camera only
+# DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed:3" # key_camera_excl_1_action_rand
 
-VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_both.json"
+VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_zelda.json"
 
 # Single-dir / validation alternatives (comment out DATA_DIR above and uncomment one block):
 # MC wasd only:
@@ -90,7 +91,7 @@ training_args=(
   --tracker_project_name "wangame_1.3b_zelda"
   --output_dir $RUN_DIR
   --wandb_run_name "$WANDB_RUN_NAME"
-  --max_train_steps 20000
+  --max_train_steps 80000
   --train_batch_size $BS_PER_GPU
   --train_sp_batch_size $BS_PER_GPU
   --gradient_accumulation_steps $GRADIENT_ACCUMULATION_STEPS

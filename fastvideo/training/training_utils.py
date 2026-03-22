@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+from copy import deepcopy
 import json
 import math
 import os
@@ -23,6 +24,19 @@ from fastvideo.training.checkpointing_utils import (ModelWrapper,
 logger = init_logger(__name__)
 
 _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES = False
+
+
+def _get_transformer_config_for_save(transformer) -> dict[str, Any]:
+    config_dict = deepcopy(transformer.hf_config)
+    if "dtype" in config_dict:
+        del config_dict["dtype"]  # TODO
+
+    arch_config = getattr(getattr(transformer, "config", None), "arch_config",
+                          None)
+    image_cross_attn_type = getattr(arch_config, "image_cross_attn_type", None)
+    if image_cross_attn_type is not None:
+        config_dict["image_cross_attn_type"] = image_cross_attn_type
+    return config_dict
 
 
 def _extract_step_from_checkpoint_path(checkpoint_path: str) -> int:
@@ -209,9 +223,7 @@ def save_checkpoint(transformer,
                     local_main_process_only=False)
 
         # Save model config
-        config_dict = transformer.hf_config
-        if "dtype" in config_dict:
-            del config_dict["dtype"]  # TODO
+        config_dict = _get_transformer_config_for_save(transformer)
         config_path = os.path.join(transformer_save_dir, "config.json")
         # save dict as json
         with open(config_path, "w") as f:
@@ -527,9 +539,7 @@ def save_distillation_checkpoint(
             local_main_process_only=False)
 
         # Save model config
-        config_dict = generator_transformer.hf_config
-        if "dtype" in config_dict:
-            del config_dict["dtype"]  # TODO
+        config_dict = _get_transformer_config_for_save(generator_transformer)
         config_path = os.path.join(inference_save_dir, "config.json")
         # save dict as json
         with open(config_path, "w") as f:
@@ -567,9 +577,8 @@ def save_distillation_checkpoint(
                 local_main_process_only=False)
 
             # Save model config
-            config_dict_2 = generator_transformer_2.hf_config
-            if "dtype" in config_dict_2:
-                del config_dict_2["dtype"]  # TODO
+            config_dict_2 = _get_transformer_config_for_save(
+                generator_transformer_2)
             config_path_2 = os.path.join(inference_save_dir_2, "config.json")
             with open(config_path_2, "w") as f:
                 json.dump(config_dict_2, f, indent=4)

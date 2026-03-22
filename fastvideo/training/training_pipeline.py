@@ -637,7 +637,9 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
     def _save_best_checkpoint_if_needed(self, step: int) -> None:
         assert self.training_args is not None, "training_args must be set"
-        top_k = max(1, int(self.training_args.best_checkpoint_top_k))
+        top_k = int(self.training_args.best_checkpoint_top_k)
+        if top_k <= 0:
+            return
         metric = self._last_mf_angle_err_mean
 
         should_save = 0
@@ -865,9 +867,10 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     pass
 
                 self.tracker.log(metrics, step)
-            if (step >= self.training_args.best_checkpoint_start_step
-                    and step %
-                    self.training_args.training_state_checkpointing_steps == 0):
+            checkpoint_start = self.training_args.checkpoint_start_step
+            if (self.training_args.training_state_checkpointing_steps > 0
+                    and step >= checkpoint_start and step
+                    % self.training_args.training_state_checkpointing_steps == 0):
                 with self.profiler_controller.region(
                         "profiler_region_training_save_checkpoint"):
                     save_checkpoint(self.transformer, self.global_rank,
@@ -895,8 +898,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         "GPU memory usage after validation: %s MB, trainable params: %sB",
                         gpu_memory_usage, trainable_params)
 
-                best_start = self.training_args.best_checkpoint_start_step
-                if (best_start > 0 and step >= best_start
+                if (self.training_args.best_checkpoint_top_k > 0
+                        and step >= checkpoint_start
                         and math.isfinite(self._last_mf_angle_err_mean)):
                     self._save_best_checkpoint_if_needed(step)
 

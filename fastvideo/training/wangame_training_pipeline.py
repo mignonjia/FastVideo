@@ -56,6 +56,49 @@ class WanGameTrainingPipeline(TrainingPipeline):
     def set_schemas(self):
         self.train_dataset_schema = pyarrow_schema_wangame
 
+    def _resolve_requested_temporal_lengths(self) -> tuple[int, int]:
+        """Resolve frame and latent horizons into a single consistent pair."""
+        temporal_compression_ratio = (
+            self.training_args.pipeline_config.vae_config.arch_config.
+            temporal_compression_ratio)
+        requested_num_latent_t = self.training_args.num_latent_t
+        requested_num_frames = self.training_args.num_frames
+
+        if requested_num_latent_t <= 0 and requested_num_frames <= 0:
+            raise ValueError(
+                "Expected num_latent_t or num_frames to be set for WanGame training"
+            )
+
+        if requested_num_frames > 0:
+            frame_limited_num_latent_t = (
+                (requested_num_frames - 1) // temporal_compression_ratio + 1)
+            resolved_num_latent_t = (
+                frame_limited_num_latent_t if requested_num_latent_t <= 0 else
+                min(requested_num_latent_t, frame_limited_num_latent_t))
+        else:
+            resolved_num_latent_t = requested_num_latent_t
+
+        resolved_num_frames = (
+            (resolved_num_latent_t - 1) * temporal_compression_ratio + 1)
+
+        if ((requested_num_frames > 0
+             and requested_num_frames != resolved_num_frames)
+                or (requested_num_latent_t > 0
+                    and requested_num_latent_t != resolved_num_latent_t)):
+            if not getattr(self, "_logged_temporal_resolution", False):
+                logger.warning(
+                    "Resolving temporal length mismatch: "
+                    "requested num_frames=%s, num_latent_t=%s -> "
+                    "using num_frames=%s, num_latent_t=%s",
+                    requested_num_frames,
+                    requested_num_latent_t,
+                    resolved_num_frames,
+                    resolved_num_latent_t,
+                )
+                self._logged_temporal_resolution = True
+
+        return resolved_num_latent_t, resolved_num_frames
+
     def set_trainable(self) -> None:
         """
         Override to only train newly added action-related parameters:
@@ -176,13 +219,14 @@ class WanGameTrainingPipeline(TrainingPipeline):
             # Get first batch of new epoch
             batch = next(self.train_loader_iter)
 
+        requested_num_latent_t, _ = self._resolve_requested_temporal_lengths()
         latents = batch['vae_latent']
-        latents = latents[:, :, :self.training_args.num_latent_t]
+        latents = latents[:, :, :requested_num_latent_t]
         # encoder_hidden_states = batch['text_embedding']
         # encoder_attention_mask = batch['text_attention_mask']
         clip_features = batch['clip_feature']
         image_latents = batch['first_frame_latent']
-        image_latents = image_latents[:, :, :self.training_args.num_latent_t]
+        image_latents = image_latents[:, :, :requested_num_latent_t]
         pil_image = batch['pil_image']
         infos = batch['info_list']
 
@@ -198,20 +242,26 @@ class WanGameTrainingPipeline(TrainingPipeline):
         training_batch.infos = infos
 
         # Action conditioning
+        temporal_compression_ratio = (
+            self.training_args.pipeline_config.vae_config.arch_config.
+            temporal_compression_ratio)
+        expected_num_frames = (
+            (training_batch.latents.shape[2] - 1) * temporal_compression_ratio
+            + 1)
+
         if 'mouse_cond' in batch and batch['mouse_cond'].numel() > 0:
-            training_batch.mouse_cond = batch['mouse_cond'].to(
+            training_batch.mouse_cond = batch['mouse_cond'][:, :expected_num_frames].to(
                 get_local_torch_device(), dtype=torch.bfloat16)
         else:
             training_batch.mouse_cond = None
 
         if 'keyboard_cond' in batch and batch['keyboard_cond'].numel() > 0:
-            training_batch.keyboard_cond = batch['keyboard_cond'].to(
+            training_batch.keyboard_cond = batch['keyboard_cond'][:, :expected_num_frames].to(
                 get_local_torch_device(), dtype=torch.bfloat16)
         else:
             training_batch.keyboard_cond = None
 
         # Validate action temporal dimensions match video num_frames
-        expected_num_frames = (self.training_args.num_latent_t - 1) * 4 + 1
         if training_batch.keyboard_cond is not None:
             assert training_batch.keyboard_cond.shape[1] == expected_num_frames, (
                 f"keyboard_cond temporal dim {training_batch.keyboard_cond.shape[1]} "
@@ -236,9 +286,12 @@ class WanGameTrainingPipeline(TrainingPipeline):
         image_latents = training_batch.image_latents.to(
             get_local_torch_device(), dtype=torch.bfloat16)
 
-        temporal_compression_ratio = self.training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-        num_frames = (self.training_args.num_latent_t -
-                      1) * temporal_compression_ratio + 1
+        temporal_compression_ratio = (
+            self.training_args.pipeline_config.vae_config.arch_config.
+            temporal_compression_ratio)
+        num_latent_t = image_latents.shape[2]
+        num_frames = (
+            (num_latent_t - 1) * temporal_compression_ratio + 1)
         batch_size, num_channels, _, latent_height, latent_width = image_latents.shape
         mask_lat_size = torch.ones(batch_size, 1, num_frames, latent_height,
                                    latent_width)
@@ -332,13 +385,11 @@ class WanGameTrainingPipeline(TrainingPipeline):
         assert self.seed is not None
         sampling_param.seed = self.seed
 
+        _, num_frames = self._resolve_requested_temporal_lengths()
+        sampling_param.num_frames = num_frames
         latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
                         sampling_param.height // 8, sampling_param.width // 8]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
-        temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-        num_frames = (training_args.num_latent_t -
-                      1) * temporal_compression_factor + 1
-        sampling_param.num_frames = num_frames
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
             latents=None,
@@ -353,14 +404,17 @@ class WanGameTrainingPipeline(TrainingPipeline):
         if "keyboard_cond" in validation_batch and validation_batch[
                 "keyboard_cond"] is not None:
             keyboard_cond = validation_batch["keyboard_cond"]
-            keyboard_cond = torch.tensor(keyboard_cond, dtype=torch.bfloat16)
+            keyboard_cond = torch.tensor(
+                keyboard_cond[:sampling_param.num_frames],
+                dtype=torch.bfloat16)
             keyboard_cond = keyboard_cond.unsqueeze(0)
             batch.keyboard_cond = keyboard_cond
 
         if "mouse_cond" in validation_batch and validation_batch[
                 "mouse_cond"] is not None:
             mouse_cond = validation_batch["mouse_cond"]
-            mouse_cond = torch.tensor(mouse_cond, dtype=torch.bfloat16)
+            mouse_cond = torch.tensor(
+                mouse_cond[:sampling_param.num_frames], dtype=torch.bfloat16)
             mouse_cond = mouse_cond.unsqueeze(0)
             batch.mouse_cond = mouse_cond
 

@@ -14,7 +14,7 @@ class WanGameVideoArchConfig(DiTArchConfig):
 
     param_names_mapping: dict = field(
         default_factory=lambda: {
-            r"^patch_embedding\.(.*)$":
+            r"^patch_embedding\.(?!proj\.)(.*)$":
             r"patch_embedding.proj.\1",
             r"^condition_embedder\.text_embedder\.linear_1\.(.*)$":
             r"condition_embedder.text_embedder.fc_in.\1",
@@ -100,6 +100,9 @@ class WanGameVideoArchConfig(DiTArchConfig):
     sink_size: int = 0  # Size of the attention sink, we keep the first `sink_size` frames unchanged when rolling the KV cache
     num_frames_per_block: int = 3
     sliding_window_num_frames: int = 21
+    image_cross_attn_type: str = "wangame"
+    action_config: dict = field(default_factory=dict)
+    hidden_size: int | None = None
 
     def __post_init__(self):
         super().__post_init__()

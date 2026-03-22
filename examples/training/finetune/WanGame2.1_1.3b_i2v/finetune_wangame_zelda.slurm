@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=wangame_1.3b
+#SBATCH --job-name=wg-zelda
 #SBATCH --partition=main
 #SBATCH --nodes=4
 #SBATCH --ntasks=4
@@ -17,7 +17,7 @@ export TORCH_NCCL_ENABLE_MONITORING=0
 export NCCL_DEBUG_SUBSYS=INIT,NET
 # different cache dir for different processes
 export TRITON_CACHE_DIR=/tmp/triton_cache_${SLURM_PROCID}
-export MASTER_PORT=29501
+export MASTER_PORT=29502
 export NODE_RANK=$SLURM_PROCID
 nodes=( $(scontrol show hostnames $SLURM_JOB_NODELIST) )
 export MASTER_ADDR=${nodes[0]}
@@ -34,40 +34,42 @@ export HOME="/mnt/weka/home/hao.zhang/mhuo"
 
 # Configs
 NUM_GPUS=8
-NUM_NODES=4   # TODO: change this to 1 to debug
+NUM_NODES=4
 NUM_TOTAL_GPUS=$((NUM_GPUS * NUM_NODES))
 BS_PER_GPU=1
 GRADIENT_ACCUMULATION_STEPS=1
-WANDB_RUN_NAME="Doom from MC freeze action"
-RUN_DIR="wangame_1.3b"
-CHECKPOINTING_STEPS=100000 # This means checkpoint every 100000 steps, effectively no ckpt will be saved
-ACTION_WARMUP_STEPS=100000 # This means the action modules will be frozen for the first 100000 steps. 
-# Effectively, during the total 100000 steps, action modules are always frozen.
-LEARNING_RATE=1e-5
-# Freeze base DiT, only train action modules
-Freeze_DiT=false
+WANDB_RUN_NAME="Zelda_MC_no_action"
+FREEZE_DIT=False
+RUN_DIR="wangame_1.3b_zelda_with_MC_init"
+CHECKPOINTING_STEPS=4000
+CHECKPOINT_START_STEP=0
+BEST_CHECKPOINT_TOP_K=0
+ACTION_WARMUP_STEPS=20000
+LEARNING_RATE=2e-5
+SEED=1000
+DMD_DENOISING_STEPS="1000,750,500,250,0"
+VAL_ONLY=False
 
 MODEL_PATH="weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers"
-# CKPT_SAFETENSOR="wangame_1.3b_wsad_random_lr_1e-5/checkpoint-2000/transformer/diffusion_pytorch_model.safetensors"
-# CKPT_SAFETENSOR="wangame_1.3b_with_warmup_lr_1e-5/checkpoint-7000/transformer/diffusion_pytorch_model.safetensors"
-CKPT_SAFETENSOR="wangame_1.3b_1action_rand_from_scratch/checkpoint-7000/transformer/diffusion_pytorch_model.safetensors"
+CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/kaiqin/mg_models/Matrix-Game-2.0-Base-Diffusers/transformer/diffusion_pytorch_model.safetensors"
+# CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/wangame_1.3b_long_run/checkpoint-best-step-61500/transformer/diffusion_pytorch_model.safetensors"
 
 # Data dirs (use one of the following):
 #   - DATA_DIR_ALL: all datasets below combined (comma-separated)
 #   - Or a single path / subset; optional ":N" = repeat, ":0" = skip
 #
-DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0204_2130/preprocessed:0" # Random
-DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0204_1600/preprocessed:1" # Doom
-DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/0_static_plus_w_only/preprocessed:0" # Static + w only
-DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed:0" # w/s/a/d only
-DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/preprocessed:0" # wasd only
-DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/camera/preprocessed:0" # camera l-only and r-only
-DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/camera4hold_alpha1/preprocessed:0" # camera only
-DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed:0" # key_camera_excl_1_action_rand
-DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/alex/wm-lab/datas/cache/zelda_overfit:0" # zelda 
+DATA_DIR="/mnt/weka/home/hao.zhang/alex/wm-lab/datas/datasets/zeldam2:1" # Zelda
+DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0204_2130/preprocessed:1" # Random
+DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0204_1600/preprocessed:0" # Doom
+DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/0_static_plus_w_only/preprocessed:3" # Static + w only
+DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed:3" # w/s/a/d only
+DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/preprocessed:3" # wasd only
+DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/camera/preprocessed:3" # camera l-only and r-only
+DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/camera4hold_alpha1/preprocessed:3" # camera only
+DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed:3" # key_camera_excl_1_action_rand
 
-VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random.json" # TODO: double check this, you may remove some MC image and add more doom image
-#
+VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_both.json"
+
 # Single-dir / validation alternatives (comment out DATA_DIR above and uncomment one block):
 # MC wasd only:
 #   DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed"
@@ -85,26 +87,23 @@ VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validati
 
 # Training arguments
 training_args=(
-  --tracker_project_name "wangame_1.3b"
+  --tracker_project_name "wangame_1.3b_zelda"
   --output_dir $RUN_DIR
   --wandb_run_name "$WANDB_RUN_NAME"
-  --max_train_steps 10000
+  --max_train_steps 20000
   --train_batch_size $BS_PER_GPU
   --train_sp_batch_size $BS_PER_GPU
   --gradient_accumulation_steps $GRADIENT_ACCUMULATION_STEPS
-  --num_latent_t 20
-  --num_height 352
-  --num_width 640
-  --num_frames 77
+  --num_latent_t 9
+  --num_height 480
+  --num_width 832
+  --num_frames 33
   --enable_gradient_checkpointing_type "full"
+  --train_action_only $FREEZE_DIT
   --action_warmup_steps $ACTION_WARMUP_STEPS
-  --init_weights_from_safetensors $CKPT_SAFETENSOR 
-  # TODO: check terminal log or log file xxx.err, whether there is a output line saying "Starting training with 1.53 B trainable parameters (total)". If both action modules are frozen, it should be around 1.53B, otherwise it could be 1.6B.
+  # --resume_from_checkpoint $RESUME_FROM_CHECKPOINT
+  --init_weights_from_safetensors $CKPT_SAFETENSOR
 )
-
-if [ "$FREEZE_DiT" = "true" ]; then
-  training_args+=(--train_action_only)
-fi
 
 # Parallel arguments
 parallel_args=(
@@ -125,13 +124,14 @@ model_args=(
 dataset_args=(
   --data_path "$DATA_DIR"
   --dataloader_num_workers 1
+  --apply_bot_died_filter False
 )
 
 # Validation arguments
 validation_args=(
   --log_validation
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 100
+  --validation_steps 500
   --validation_sampling_steps "40"
   --validation_guidance_scale "1.0"
   --validation_num_samples $NUM_TOTAL_GPUS
@@ -141,16 +141,22 @@ validation_args=(
 optimizer_args=(
   --learning_rate $LEARNING_RATE
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 100000
+  --weight_only_checkpointing_steps $CHECKPOINTING_STEPS
   --training_state_checkpointing_steps $CHECKPOINTING_STEPS
-  --weight_decay 1e-4
+  --checkpoint_start_step $CHECKPOINT_START_STEP
+  --best_checkpoint_top_k $BEST_CHECKPOINT_TOP_K
+  --weight_decay 0
   --max_grad_norm 1.0
 )
 
 # Miscellaneous arguments
 miscellaneous_args=(
   --inference_mode False
-  --checkpoints_total_limit 2
+  --seed $SEED
+  --dmd_denoising_steps "$DMD_DENOISING_STEPS"
+  --flow_shift 3
+  --val_only $VAL_ONLY
+  --checkpoints_total_limit 3
   --training_cfg_rate 0.1
   --multi_phased_distill_schedule "4000-1"
   --not_apply_cfg_solver

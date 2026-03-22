@@ -13,6 +13,7 @@ from typing import cast
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from safetensors import safe_open
 from safetensors.torch import load_file as safetensors_load_file
 from torch.distributed import init_device_mesh
 from transformers import AutoImageProcessor, AutoProcessor, AutoTokenizer
@@ -38,6 +39,17 @@ from fastvideo.utils import PRECISION_TO_TYPE, is_pin_memory_available
 from fastvideo.hooks.layerwise_offload import enable_layerwise_offload
 
 logger = init_logger(__name__)
+
+
+def _looks_like_matrixgame_transformer_checkpoint(
+    safetensors_list: list[str],
+) -> bool:
+    for safetensors_path in safetensors_list:
+        with safe_open(safetensors_path, framework="pt", device="cpu") as f:
+            for key in f.keys():
+                if ".action_model." in key:
+                    return True
+    return False
 
 
 class ComponentLoader(ABC):
@@ -822,6 +834,17 @@ class TransformerLoader(ComponentLoader):
                     "Custom initialization weights must be a safetensors file"
                 )
                 safetensors_list = [custom_weights_path]
+
+            arch_config = getattr(dit_config, "arch_config", None)
+            if (arch_config is not None
+                    and hasattr(arch_config, "image_cross_attn_type")
+                    and arch_config.image_cross_attn_type == "wangame"
+                    and _looks_like_matrixgame_transformer_checkpoint(
+                        safetensors_list)):
+                arch_config.image_cross_attn_type = "matrixgame"
+                logger.info(
+                    "Detected MatrixGame-style init checkpoint; switching Wangame image cross-attention to matrixgame mode."
+                )
 
         logger.info(
             "Loading model from %s safetensors files: %s",

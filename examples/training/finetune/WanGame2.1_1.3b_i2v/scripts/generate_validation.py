@@ -112,6 +112,23 @@ val_img_mc_list = [
     "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/humanplay/000013.jpg",
 ]
 
+val_img_zelda_list = [
+    "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/5TTrlqAguhQ_chunk_0484/frames/run_ahead.png",
+    "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/-BxyBxfDKA0_chunk_0292/frames/still.png", 
+    "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/5TTrlqAguhQ_chunk_0006/frames/still.png",
+    "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/N6ObBAt41bg_chunk_0300/frames/run_right.png",
+    "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/5TTrlqAguhQ_chunk_0006/frames/still_2.png", 
+    "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/N6ObBAt41bg_chunk_0019/frames/still.png",
+    "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/N6ObBAt41bg_chunk_0019/frames/still_2.png",
+    "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/N6ObBAt41bg_chunk_0300/frames/run_ahead.png"
+]
+
+val_action_zelda_list_camera_only = [
+    "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/5TTrlqAguhQ_chunk_0067/frames/fly.png",
+    "/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/N6ObBAt41bg_chunk_0140/frames/on_horse.png"
+]
+
+
 # Get train data list
 train_mc_data_dir = "/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1"
 train_mc_idx_list = ["000000", "000500", "001000", "001500", "002000", "002500", "003000", "003500"]
@@ -156,26 +173,27 @@ else:
 
 holder = 0 # placeholder
 # 32 placeholders (idx 0-31). Fill in manually.
-a0 = ["00 Val-00: W", val_img_list[0], key_W]
-a1 = ["01 Val-01: S", val_img_list[1], key_S]
-a2 = ["02 Val-02: A", val_img_list[2], key_A]
-a3 = ["03 Val-03: D", val_img_list[3], key_D]
-a4 = ["04 Val-04: u", val_img_list[4], camera_u]
-a5 = ["05 Val-05: d", val_img_list[5], camera_d]
-a6 = ["06 Val-06: l", val_img_list[4], camera_l]
-a7 = ["07 Val-07: r", val_img_list[5], camera_r]
-a8 = ["08 Val-00: key rand", val_img_list[0], key_1_action_rand_1]
-a9 = ["09 Val-01: key rand", val_img_list[1], key_1_action_rand_2]
-a10 = ["10 Val-02: camera rand", val_img_list[2], camera_1_action_rand_1]
-a11 = ["11 Val-03: camera rand", val_img_list[3], camera_1_action_rand_2]
+
+a0 = ["00 Val-00: W", val_img_zelda_list[0], key_W]
+a1 = ["01 Val-01: S", val_img_zelda_list[1], key_S]
+a2 = ["02 Val-02: A", val_img_zelda_list[2], key_A]
+a3 = ["03 Val-03: D", val_img_zelda_list[3], key_D]
+a4 = ["04 Val-04: u", val_action_zelda_list_camera_only[0], camera_u]
+a5 = ["05 Val-05: d", val_action_zelda_list_camera_only[1], camera_d]
+a6 = ["06 Val-06: l", val_img_zelda_list[4], camera_l]
+a7 = ["07 Val-07: r", val_img_zelda_list[5], camera_r]
+a8 = ["08 Val-00: key rand", val_img_list[6], key_1_action_rand_1]
+a9 = ["09 Val-01: key rand", val_img_list[7], key_1_action_rand_2]
+a10 = ["10 Val-02: camera rand", val_action_zelda_list_camera_only[0], camera_1_action_rand_1]
+a11 = ["11 Val-03: camera rand", val_action_zelda_list_camera_only[1], camera_1_action_rand_2]
 a12 = ["12 Val-00: key+camera excl rand", val_img_list[0], key_camera_excl_1_action_rand_1]
 a13 = ["13 Val-01: key+camera excl rand", val_img_list[1], key_camera_excl_1_action_rand_2]
 a14 = ["14 Val-02: key+camera rand", val_img_list[2], key_camera_1_action_rand_1]
 a15 = ["15 Val-03: key+camera rand", val_img_list[3], key_camera_1_action_rand_2]
 a16 = ["16 Val-04: (simultaneous) key rand", val_img_list[4], key_2_action_rand_1]
 a17 = ["17 Val-05: (simultaneous) camera rand", val_img_list[5], camera_2_action_rand_1]
-a18 = ["18 Val-06: (simultaneous) key+camera excl rand", val_img_list[5], key_camera_excl_2_action_rand_1]
-a19 = ["19 Val-07: (simultaneous) key+camera rand", val_img_list[5], key_camera_2_action_rand_1]
+a18 = ["18 Val-06: (simultaneous) key+camera excl rand", val_img_list[6], key_camera_excl_2_action_rand_1]
+a19 = ["19 Val-07: (simultaneous) key+camera rand", val_img_list[7], key_camera_2_action_rand_1]
 a20 = ["20 Val-08: W+A", val_img_list[0], key_wa]
 a21 = ["21 Val-09: S+u", val_img_list[1], key_s_u]
 a22 = ["22 Val-08: Still", val_img_list[2], still]
@@ -184,14 +202,43 @@ a24 = ["24 Val-06: key+camera excl rand Frame 4", val_img_list[4], key_camera_ex
 a25 = ["25 Val-07: key+camera excl rand Frame 4", val_img_list[5], key_camera_excl_1_action_rand_2_f4]
 a26 = ["26 Train-00", train_img_list[0], train_action_list[0]]
 a27 = ["27 Train-01", train_img_list[1], train_action_list[1]]
-# a28 = ["28 Train-02", train_img_list[2], train_action_list[2]]
-# a29 = ["29 Train-03", train_img_list[3], train_action_list[3]]
-# a30 = ["30 Train-04", train_img_list[4], train_action_list[4]]
-# a31 = ["31 Train-05", train_img_list[5], train_action_list[5]]
 a28 = ["28 Doom-00: W", val_img_doom_list[0], key_W]
 a29 = ["29 Doom-01: key rand", val_img_doom_list[1], key_1_action_rand_1]
 a30 = ["30 Doom-02: camera rand", val_img_doom_list[2], camera_1_action_rand_1]
 a31 = ["31 Doom-03: key+camera excl rand", val_img_doom_list[3], key_camera_excl_1_action_rand_1]
+
+# a0 = ["00 Val-00: W", val_img_list[0], key_W]
+# a1 = ["01 Val-01: S", val_img_list[1], key_S]
+# a2 = ["02 Val-02: A", val_img_list[2], key_A]
+# a3 = ["03 Val-03: D", val_img_list[3], key_D]
+# a4 = ["04 Val-04: u", val_img_list[4], camera_u]
+# a5 = ["05 Val-05: d", val_img_list[5], camera_d]
+# a6 = ["06 Val-06: l", val_img_list[4], camera_l]
+# a7 = ["07 Val-07: r", val_img_list[5], camera_r]
+# a8 = ["08 Val-00: key rand", val_img_list[0], key_1_action_rand_1]
+# a9 = ["09 Val-01: key rand", val_img_list[1], key_1_action_rand_2]
+# a10 = ["10 Val-02: camera rand", val_img_list[2], camera_1_action_rand_1]
+# a11 = ["11 Val-03: camera rand", val_img_list[3], camera_1_action_rand_2]
+# a12 = ["12 Val-00: key+camera excl rand", val_img_list[0], key_camera_excl_1_action_rand_1]
+# a13 = ["13 Val-01: key+camera excl rand", val_img_list[1], key_camera_excl_1_action_rand_2]
+# a14 = ["14 Val-02: key+camera rand", val_img_list[2], key_camera_1_action_rand_1]
+# a15 = ["15 Val-03: key+camera rand", val_img_list[3], key_camera_1_action_rand_2]
+# a16 = ["16 Val-04: (simultaneous) key rand", val_img_list[4], key_2_action_rand_1]
+# a17 = ["17 Val-05: (simultaneous) camera rand", val_img_list[5], camera_2_action_rand_1]
+# a18 = ["18 Val-06: (simultaneous) key+camera excl rand", val_img_list[5], key_camera_excl_2_action_rand_1]
+# a19 = ["19 Val-07: (simultaneous) key+camera rand", val_img_list[5], key_camera_2_action_rand_1]
+# a20 = ["20 Val-08: W+A", val_img_list[0], key_wa]
+# a21 = ["21 Val-09: S+u", val_img_list[1], key_s_u]
+# a22 = ["22 Val-08: Still", val_img_list[2], still]
+# a23 = ["23 Val-09: Still", val_img_list[3], still]
+# a24 = ["24 Val-06: key+camera excl rand Frame 4", val_img_list[4], key_camera_excl_1_action_rand_1_f4]
+# a25 = ["25 Val-07: key+camera excl rand Frame 4", val_img_list[5], key_camera_excl_1_action_rand_2_f4]
+# a26 = ["26 Train-00", train_img_list[0], train_action_list[0]]
+# a27 = ["27 Train-01", train_img_list[1], train_action_list[1]]
+# a28 = ["28 Doom-00: W", val_img_doom_list[0], key_W]
+# a29 = ["29 Doom-01: key rand", val_img_doom_list[1], key_1_action_rand_1]
+# a30 = ["30 Doom-02: camera rand", val_img_doom_list[2], camera_1_action_rand_1]
+# a31 = ["31 Doom-03: key+camera excl rand", val_img_doom_list[3], key_camera_excl_1_action_rand_1]
 
 Val_entries = {
     0: a0,

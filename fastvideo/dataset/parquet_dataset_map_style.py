@@ -561,6 +561,88 @@ def build_bot_died_excluded_indices(
     return excluded
 
 
+def _extract_idx_prefix(value: Any) -> int | None:
+    if not isinstance(value, str) or not value.startswith("idx"):
+        return None
+    prefix, _, _ = value.partition("_")
+    numeric_part = prefix[3:]
+    if not numeric_part.isdigit():
+        return None
+    return int(numeric_part)
+
+
+def build_label_excluded_indices(
+    labels_json_path: str,
+    parquet_files: list[str],
+    lengths: list[int],
+) -> set[int]:
+    """Exclude rows whose ``file_name`` or ``id`` prefix matches an idx
+    labeled ``bad`` in ``labels_json_path``.
+    """
+    import json
+
+    if not labels_json_path:
+        return set()
+
+    labels_json_path = os.path.realpath(os.path.expanduser(labels_json_path))
+    with open(labels_json_path) as f:
+        labels = json.load(f)
+
+    if not isinstance(labels, dict):
+        raise ValueError(
+            f"Expected label json at {labels_json_path} to be a dict, "
+            f"got {type(labels).__name__}"
+        )
+
+    bad_idx_prefixes = {
+        int(k) for k, v in labels.items()
+        if str(v).strip().lower() == "bad" and str(k).strip().isdigit()
+    }
+    logger.info(
+        "Loaded label exclusions from %s: %d bad idx prefixes",
+        labels_json_path,
+        len(bad_idx_prefixes),
+    )
+
+    if not bad_idx_prefixes:
+        return set()
+
+    excluded: set[int] = set()
+    global_offset = 0
+    for file_path, length in zip(parquet_files, lengths, strict=True):
+        try:
+            parquet_file = pq.ParquetFile(file_path)
+            available_columns = set(parquet_file.schema_arrow.names)
+            candidate_columns = [
+                name for name in ("file_name", "id")
+                if name in available_columns
+            ]
+            if not candidate_columns:
+                raise KeyError(
+                    "Neither 'file_name' nor 'id' exists in parquet schema"
+                )
+
+            table = parquet_file.read(columns=candidate_columns)
+            primary_column = ("file_name"
+                              if "file_name" in table.column_names else
+                              table.column_names[0])
+            identifiers = table.column(primary_column).to_pylist()
+            for local_idx, identifier in enumerate(identifiers):
+                idx_prefix = _extract_idx_prefix(identifier)
+                if idx_prefix in bad_idx_prefixes:
+                    excluded.add(global_offset + local_idx)
+        except Exception as e:
+            logger.warning(
+                "Failed to read label-filter identifiers from %s: %s",
+                file_path,
+                e,
+            )
+
+        global_offset += length
+
+    return excluded
+
+
 def build_parquet_map_style_dataloader(
         path,
         batch_size,

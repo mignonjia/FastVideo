@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=wg-zelda
 #SBATCH --partition=main
-#SBATCH --nodes=4
-#SBATCH --ntasks=4
+#SBATCH --nodes=2
+#SBATCH --ntasks=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -34,14 +34,14 @@ export HOME="/mnt/weka/home/hao.zhang/mhuo"
 
 # Configs
 NUM_GPUS=8
-NUM_NODES=4
+NUM_NODES=2
 NUM_TOTAL_GPUS=$((NUM_GPUS * NUM_NODES))
 BS_PER_GPU=1
 GRADIENT_ACCUMULATION_STEPS=1
-WANDB_RUN_NAME="Zelda_with_warmup_ckpt"
+WANDB_RUN_NAME="Zelda_with_mouse_ckpt"
 FREEZE_DIT=False
-RUN_DIR="wangame_1.3b_zelda_with_warmup_ckpt"
-CHECKPOINTING_STEPS=4000
+RUN_DIR="wangame_1.3b_zelda_with_mouse_ckpt"
+CHECKPOINTING_STEPS=10000
 CHECKPOINT_START_STEP=1
 BEST_CHECKPOINT_TOP_K=5
 ACTION_WARMUP_STEPS=0
@@ -52,7 +52,8 @@ VAL_ONLY=False
 
 MODEL_PATH="weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers"
 # CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/kaiqin/mg_models/Matrix-Game-2.0-Base-Diffusers/transformer/diffusion_pytorch_model.safetensors" 
-CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/wangame_1.3b_zelda_with_MC_init/checkpoint-20000/transformer/diffusion_pytorch_model.safetensors"
+# CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/wangame_1.3b_zelda_with_MC_init/checkpoint-20000/transformer/diffusion_pytorch_model.safetensors"
+CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/wangame_1.3b_zelda_with_warmup_ckpt/checkpoint-36000/transformer/diffusion_pytorch_model.safetensors"
 # CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/wangame_1.3b_long_run/checkpoint-best-step-61500/transformer/diffusion_pytorch_model.safetensors"
 
 # Data dirs (use one of the following):
@@ -126,6 +127,7 @@ dataset_args=(
   --data_path "$DATA_DIR"
   --dataloader_num_workers 1
   --apply_bot_died_filter False
+  --zelda_exclude_labels_json "examples/training/finetune/WanGame2.1_1.3b_i2v/scripts/video_labels.json"
 )
 
 # Validation arguments

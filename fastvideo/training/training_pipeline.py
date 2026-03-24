@@ -32,7 +32,8 @@ except Exception:
     pass
 from fastvideo.configs.sample import SamplingParam
 from fastvideo.dataset import build_parquet_map_style_dataloader
-from fastvideo.dataset.parquet_dataset_map_style import build_bot_died_excluded_indices
+from fastvideo.dataset.parquet_dataset_map_style import (
+    build_bot_died_excluded_indices, build_label_excluded_indices)
 from fastvideo.dataset.dataloader.schema import pyarrow_schema_t2v
 from fastvideo.dataset.validation_dataset import ValidationDataset
 from fastvideo.distributed import (cleanup_dist_env_and_memory,
@@ -199,8 +200,11 @@ class TrainingPipeline(LoRAPipeline, ABC):
             seed=self.seed,
             reshuffle_each_epoch=training_args.reshuffle_each_epoch)
 
-        # ── bot_died filter ────────────────────────────────────────────────
         world_group = get_world_group()
+        total = sum(self.train_dataset.lengths)
+        combined_excluded: set[int] = set()
+
+        # ── MC bot_died filter ─────────────────────────────────────────────
         bot_died_excluded: set[int] | None = None
         if training_args.apply_bot_died_filter:
             if self.global_rank == 0:
@@ -213,15 +217,41 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 bot_died_excluded, src=0)
 
             if bot_died_excluded:
-                total = sum(self.train_dataset.lengths)
-                valid_indices = [i for i in range(total)
-                                if i not in bot_died_excluded]
-                self.train_dataset.sampler.set_candidate_indices(
-                    valid_indices, epoch=0)
+                combined_excluded.update(bot_died_excluded)
                 logger.info(
                     "Applied bot_died filter: excluded %d / %d entries, "
-                    "%d remaining",
-                    len(bot_died_excluded), total, len(valid_indices))
+                    "%d remaining before other filters",
+                    len(bot_died_excluded), total,
+                    total - len(bot_died_excluded))
+
+        # ── Zelda label filter ─────────────────────────────────────────────
+        zelda_excluded: set[int] | None = None
+        if training_args.zelda_exclude_labels_json:
+            if self.global_rank == 0:
+                zelda_excluded = build_label_excluded_indices(
+                    training_args.zelda_exclude_labels_json,
+                    list(self.train_dataset.parquet_files),
+                    list(self.train_dataset.lengths),
+                )
+            zelda_excluded = world_group.broadcast_object(
+                zelda_excluded, src=0)
+
+            if zelda_excluded:
+                combined_excluded.update(zelda_excluded)
+                logger.info(
+                    "Applied Zelda label filter: excluded %d / %d entries, "
+                    "%d remaining before other filters",
+                    len(zelda_excluded), total, total - len(zelda_excluded))
+
+        if combined_excluded:
+            valid_indices = [i for i in range(total)
+                             if i not in combined_excluded]
+            self.train_dataset.sampler.set_candidate_indices(
+                valid_indices, epoch=0)
+            logger.info(
+                "Applied combined dataset exclusions: excluded %d / %d "
+                "entries, %d remaining",
+                len(combined_excluded), total, len(valid_indices))
 
         self.noise_scheduler = noise_scheduler
         if self.training_args.boundary_ratio is not None:

@@ -906,6 +906,7 @@ class TrainingArgs(FastVideoArgs):
     # When True, exclude training samples whose file_name appears in a
     # ``../filter/bot_died.json`` file next to each preprocessed directory.
     apply_bot_died_filter: bool = False
+    zelda_exclude_labels_json: str = ""
 
     # distillation args
     generator_update_interval: int = 5
@@ -1312,6 +1313,13 @@ class TrainingArgs(FastVideoArgs):
                             help="Exclude samples whose file_name appears in "
                                  "../filter/bot_died.json next to each "
                                  "preprocessed data directory")
+        parser.add_argument(
+            "--zelda-exclude-labels-json",
+            type=str,
+            default=TrainingArgs.zelda_exclude_labels_json,
+            help="Path to Zelda sample label json; rows whose identifier "
+                 "prefix matches an idx labeled 'bad' are excluded",
+        )
 
         # V-MoBA parameters
         parser.add_argument(

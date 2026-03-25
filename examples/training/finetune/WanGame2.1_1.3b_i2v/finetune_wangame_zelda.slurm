@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=wg-zelda
 #SBATCH --partition=main
-#SBATCH --nodes=4
-#SBATCH --ntasks=4
+#SBATCH --nodes=2
+#SBATCH --ntasks=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -26,23 +26,23 @@ export WANDB_API_KEY="d5b02b05e30d8cb34c7b31c6ae10416fc26dcb66"
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
-export FASTVIDEO_MAP_STYLE_CACHE_DIR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/map_style_cache"
+export FASTVIDEO_MAP_STYLE_CACHE_DIR="$HOME/FastVideo/map_style_cache"
 
 source ~/conda/miniconda/bin/activate
 conda activate mhuo-fv
-export HOME="/mnt/weka/home/hao.zhang/mhuo"
+export HOME="$HOME"
 
 # Configs
 NUM_GPUS=8
-NUM_NODES=4
+NUM_NODES=2
 NUM_TOTAL_GPUS=$((NUM_GPUS * NUM_NODES))
 BS_PER_GPU=1
 GRADIENT_ACCUMULATION_STEPS=1
-WANDB_RUN_NAME="Zelda_with_mouse_ckpt"
+WANDB_RUN_NAME="Zelda_clean_data_MG_init"
 FREEZE_DIT=False
-RUN_DIR="wangame_1.3b_zelda_with_mouse_ckpt"
+RUN_DIR="wangame_1.3b_zelda_clean_data_MG_init"
 CHECKPOINTING_STEPS=10000
-CHECKPOINT_START_STEP=1
+CHECKPOINT_START_STEP=9900
 BEST_CHECKPOINT_TOP_K=5
 ACTION_WARMUP_STEPS=0
 LEARNING_RATE=2e-5
@@ -51,36 +51,36 @@ DMD_DENOISING_STEPS="1000,750,500,250,0"
 VAL_ONLY=False
 
 MODEL_PATH="weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers"
-# CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/kaiqin/mg_models/Matrix-Game-2.0-Base-Diffusers/transformer/diffusion_pytorch_model.safetensors" 
-# CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/wangame_1.3b_zelda_with_MC_init/checkpoint-20000/transformer/diffusion_pytorch_model.safetensors"
-CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/wangame_1.3b_zelda_with_warmup_ckpt/checkpoint-36000/transformer/diffusion_pytorch_model.safetensors"
-# CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/wangame_1.3b_long_run/checkpoint-best-step-61500/transformer/diffusion_pytorch_model.safetensors"
+CKPT_SAFETENSOR="/mnt/weka/home/hao.zhang/kaiqin/mg_models/Matrix-Game-2.0-Base-Diffusers/transformer/diffusion_pytorch_model.safetensors" 
+# CKPT_SAFETENSOR="$HOME/FastVideo/wangame_1.3b_zelda_with_MC_init/checkpoint-20000/transformer/diffusion_pytorch_model.safetensors"
+# CKPT_SAFETENSOR="$HOME/FastVideo/wangame_1.3b_zelda_with_warmup_ckpt/checkpoint-36000/transformer/diffusion_pytorch_model.safetensors"
+# CKPT_SAFETENSOR="$HOME/FastVideo/wangame_1.3b_long_run/checkpoint-best-step-61500/transformer/diffusion_pytorch_model.safetensors"
 
 # Data dirs (use one of the following):
 #   - DATA_DIR_ALL: all datasets below combined (comma-separated)
 #   - Or a single path / subset; optional ":N" = repeat, ":0" = skip
 #
 DATA_DIR="/mnt/weka/home/hao.zhang/alex/wm-lab/datas/datasets/zeldam2-v2:1" # Zelda
-# DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0204_2130/preprocessed:1" # Random
-# DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0204_1600/preprocessed:0" # Doom
-# DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/0_static_plus_w_only/preprocessed:3" # Static + w only
-# DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed:3" # w/s/a/d only
-# DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/preprocessed:3" # wasd only
-# DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/camera/preprocessed:3" # camera l-only and r-only
-# DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/camera4hold_alpha1/preprocessed:3" # camera only
-# DATA_DIR="$DATA_DIR,/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed:3" # key_camera_excl_1_action_rand
+# DATA_DIR="$DATA_DIR,$HOME/traindata_0204_2130/preprocessed:1" # Random
+# DATA_DIR="$DATA_DIR,$HOME/traindata_0204_1600/preprocessed:0" # Doom
+# DATA_DIR="$DATA_DIR,$HOME/traindata_0205_1330/data/0_static_plus_w_only/preprocessed:3" # Static + w only
+# DATA_DIR="$DATA_DIR,$HOME/traindata_0205_1330/data/1_wasd_only/preprocessed:3" # w/s/a/d only
+# DATA_DIR="$DATA_DIR,$HOME/traindata_0206_1200/data/wasdonly_alpha1/preprocessed:3" # wasd only
+# DATA_DIR="$DATA_DIR,$HOME/traindata_0206_1200/data/camera/preprocessed:3" # camera l-only and r-only
+# DATA_DIR="$DATA_DIR,$HOME/traindata_0208_2000/data/camera4hold_alpha1/preprocessed:3" # camera only
+# DATA_DIR="$DATA_DIR,$HOME/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed:3" # key_camera_excl_1_action_rand
 
 VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_zelda.json"
 
 # Single-dir / validation alternatives (comment out DATA_DIR above and uncomment one block):
 # MC wasd only:
-#   DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0205_1330/data/1_wasd_only/preprocessed"
+#   DATA_DIR="$HOME/traindata_0205_1330/data/1_wasd_only/preprocessed"
 #   VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_wsad.json"
 # MC random:
-#   DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0206_1200/data/wasdonly_alpha1/preprocessed"
+#   DATA_DIR="$HOME/traindata_0206_1200/data/wasdonly_alpha1/preprocessed"
 #   VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_mc.json"
 # Doom:
-#   DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0204_1600/preprocessed"
+#   DATA_DIR="$HOME/traindata_0204_1600/preprocessed"
 #   VALIDATION_DATASET_FILE="examples/training/finetune/WanGame2.1_1.3b_i2v/validation_doom.json"
 # Overfit:
 #   DATA_DIR="mc_wasd_10/preprocessed/combined_parquet_dataset"

@@ -26,11 +26,11 @@ export WANDB_API_KEY="d5b02b05e30d8cb34c7b31c6ae10416fc26dcb66"
 export WANDB_BASE_URL="https://api.wandb.ai"
 export WANDB_MODE=online
 export FASTVIDEO_ATTENTION_BACKEND=FLASH_ATTN
-export FASTVIDEO_MAP_STYLE_CACHE_DIR="$HOME/FastVideo/map_style_cache"
+export FASTVIDEO_MAP_STYLE_CACHE_DIR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/map_style_cache"
 
 source ~/conda/miniconda/bin/activate
 conda activate mhuo-fv
-export HOME="$HOME"
+export HOME="/mnt/weka/home/hao.zhang/mhuo"
 
 # Configs
 NUM_GPUS=8

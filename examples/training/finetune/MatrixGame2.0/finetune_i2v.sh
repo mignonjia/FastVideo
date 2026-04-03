@@ -64,6 +64,7 @@ dataset_args=(
 # Validation arguments
 validation_args=(
   --log_validation
+  --evaluate_ptlflow
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
   --validation_steps 500
   --validation_sampling_steps "50"
@@ -85,6 +86,8 @@ optimizer_args=(
 miscellaneous_args=(
   --inference_mode False
   --checkpoints_total_limit 3
+  --best_checkpoint_start_step 500
+  --best_checkpoint_top_k 3
   --training_cfg_rate 0.1
   --multi_phased_distill_schedule "4000-1"
   --not_apply_cfg_solver

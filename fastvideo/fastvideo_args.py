@@ -840,6 +840,8 @@ class TrainingArgs(FastVideoArgs):
     # output
     output_dir: str = ""
     checkpoints_total_limit: int = 0
+    best_checkpoint_start_step: int = 0
+    best_checkpoint_top_k: int = 1
     resume_from_checkpoint: str = ""  # specify the checkpoint folder to resume from
 
     # optimizer & scheduler
@@ -920,6 +922,7 @@ class TrainingArgs(FastVideoArgs):
     context_noise: int = 0  # Context noise level for cache updates
     
     reinit_action_module: bool = False
+    action_warmup_steps: int = 0
     override_keyboard_dim: int | None = None
 
     @classmethod
@@ -1072,6 +1075,22 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--log-validation",
                             action=StoreBoolean,
                             help="Whether to log validation results")
+        parser.add_argument("--evaluate-ptlflow",
+                            action=StoreBoolean,
+                            help="Whether to run PTLFlow evaluation during validation")
+        parser.add_argument("--ptlflow-dir",
+                            type=str,
+                            help="Path to the PTLFlow evaluation directory")
+        parser.add_argument("--ptlflow-ckpt",
+                            type=str,
+                            help="Path to the PTLFlow checkpoint override")
+        parser.add_argument(
+            "--ptlflow-calibration-path",
+            type=str,
+            help="Path to the PTLFlow calibration JSON override")
+        parser.add_argument("--ptlflow-use-depth",
+                            action=StoreBoolean,
+                            help="Whether PTLFlow evaluation should use depth")
         parser.add_argument("--visualization-steps",
                             type=int,
                             help="Number of visualization steps")
@@ -1094,6 +1113,14 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--checkpoints-total-limit",
                             type=int,
                             help="Maximum number of checkpoints to keep")
+        parser.add_argument(
+            "--best-checkpoint-start-step",
+            type=int,
+            help="Start saving PTLFlow-ranked best checkpoints at this step; 0 disables best-checkpoint saving"
+        )
+        parser.add_argument("--best-checkpoint-top-k",
+                            type=int,
+                            help="Number of PTLFlow-ranked best checkpoints to keep")
         parser.add_argument(
             "--training-state-checkpointing-steps",
             type=int,
@@ -1360,6 +1387,10 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--reinit-action-module",
                             action=StoreBoolean,
                             help="Whether to reinitialize the action module during training")
+        parser.add_argument("--action-warmup-steps",
+                            type=int,
+                            default=TrainingArgs.action_warmup_steps,
+                            help="Freeze action-module parameters for the first N training steps")
         parser.add_argument("--override-keyboard-dim",
                             type=int,
                             default=TrainingArgs.override_keyboard_dim,

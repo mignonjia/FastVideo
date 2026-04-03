@@ -245,6 +245,19 @@ class TrainingPipeline(LoRAPipeline, ABC):
         raise NotImplementedError(
             "Training pipelines must implement this method")
 
+    def _after_validation(self, step: int) -> None:
+        """Hook for pipeline-specific post-validation behavior."""
+        return None
+
+    def _on_train_start(self) -> None:
+        """Hook for pipeline-specific train start behavior."""
+        return None
+
+    def _before_train_step(self, step: int) -> None:
+        """Hook for pipeline-specific per-step behavior."""
+        del step
+        return None
+
     def _prepare_training(self, training_batch: TrainingBatch) -> TrainingBatch:
         self.optimizer.zero_grad()
         if self.transformer_2 is not None:
@@ -595,6 +608,8 @@ class TrainingPipeline(LoRAPipeline, ABC):
         if self.training_args.resume_from_checkpoint:
             self._resume_from_checkpoint()
 
+        self._on_train_start()
+
         self.train_loader_iter = iter(self.train_dataloader)
 
         step_times: deque[float] = deque(maxlen=100)
@@ -603,6 +618,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
         self._log_validation(self.transformer, self.training_args,
                              self.init_steps)
+        self._after_validation(self.init_steps)
 
         # Train!
         progress_bar = tqdm(
@@ -614,6 +630,7 @@ class TrainingPipeline(LoRAPipeline, ABC):
         )
         for step in range(self.init_steps + 1,
                           self.training_args.max_train_steps + 1):
+            self._before_train_step(step)
             start_time = time.perf_counter()
             if vsa_available:
                 vsa_sparsity = self.training_args.VSA_sparsity
@@ -682,7 +699,10 @@ class TrainingPipeline(LoRAPipeline, ABC):
                     pass
 
                 self.tracker.log(metrics, step)
-            if step % self.training_args.training_state_checkpointing_steps == 0:
+            if (self.training_args.training_state_checkpointing_steps > 0
+                    and step
+                    % self.training_args.training_state_checkpointing_steps
+                    == 0):
                 with self.profiler_controller.region(
                         "profiler_region_training_save_checkpoint"):
                     save_checkpoint(self.transformer, self.global_rank,
@@ -697,11 +717,14 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 self.visualize_intermediate_latents(training_batch,
                                                     self.training_args, step)
 
-            if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
+            if (self.training_args.log_validation
+                    and self.training_args.validation_steps > 0
+                    and step % self.training_args.validation_steps == 0):
                 with self.profiler_controller.region(
                         "profiler_region_training_validation"):
                     self._log_validation(self.transformer, self.training_args,
                                          step)
+                    self._after_validation(step)
                     gpu_memory_usage = current_platform.get_torch_device(
                     ).memory_allocated() / 1024**2
                     trainable_params = round(

@@ -57,15 +57,15 @@ NUM_TOTAL_GPUS=$((NUM_GPUS * NUM_NODES))
 # Training arguments
 training_args=(
   --tracker_project_name "wangame_1.3b_zelda"
-  --output_dir "/mnt/data/world_model/zelda_runs/mg_finetune_zelda"
+  --output_dir "/mnt/data/world_model/zelda_runs/mg_finetune_zelda_warmup"
   # --wandb_run_name "${RUN_NAME}_bs64_continue_resume_from_8K"
-  --wandb_run_name "mg_zelda"
+  --wandb_run_name "mg_zelda_warmup"
   --override_transformer_cls_name "MatrixGameWanModel"
-  --max_train_steps 8
+  --max_train_steps 20000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --action_warmup_steps 0
+  --action_warmup_steps 20000
   --num_latent_t 9
   --num_height 480
   --num_width 832
@@ -99,10 +99,9 @@ dataset_args=(
 # Validation arguments
 validation_args=(
   --log_validation
-  --evaluate_ptlflow
-  --ptlflow_dir "/mnt/home/mhuo/ptlflow"
+  # --evaluate_ptlflow
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
-  --validation_steps 2
+  --validation_steps 500
   --validation_sampling_steps "50"
   --validation_guidance_scale "6.0"
 )
@@ -112,8 +111,8 @@ optimizer_args=(
   --learning_rate 2e-5
   --betas "0.9,0.95"
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 4
-  --training_state_checkpointing_steps 4
+  --weight_only_checkpointing_steps 5000
+  --training_state_checkpointing_steps 5000
   --weight_decay 0
   --max_grad_norm 1.0
 )
@@ -121,9 +120,9 @@ optimizer_args=(
 # Miscellaneous arguments
 miscellaneous_args=(
   --inference_mode False
-  --checkpoints_total_limit 2
+  --checkpoints_total_limit 4
   --best_checkpoint_start_step 1
-  --best_checkpoint_top_k 2
+  --best_checkpoint_top_k 0
   --training_cfg_rate 0.1
   --multi_phased_distill_schedule "4000-1"
   --not_apply_cfg_solver

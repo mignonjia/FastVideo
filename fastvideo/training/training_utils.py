@@ -2,6 +2,8 @@
 import json
 import math
 import os
+import re
+import shutil
 import time
 from collections.abc import Callable, Iterator
 from enum import Enum
@@ -23,6 +25,80 @@ from fastvideo.training.checkpointing_utils import (ModelWrapper,
 logger = init_logger(__name__)
 
 _HAS_ERRORED_CLIP_GRAD_NORM_WHILE_HANDLING_FAILING_DTENSOR_CASES = False
+_BEST_CHECKPOINT_DIR_RE = re.compile(r"^checkpoint-best-step-(\d+)$")
+
+
+def _broadcast_int(value: int, src: int = 0) -> int:
+    if not dist.is_available() or not dist.is_initialized():
+        return int(value)
+    backend = dist.get_backend()
+    use_cuda = backend == "nccl" and torch.cuda.is_available()
+    device = torch.device("cuda") if use_cuda else torch.device("cpu")
+    tensor = torch.tensor([int(value)], dtype=torch.int32, device=device)
+    dist.broadcast(tensor, src=src)
+    return int(tensor.item())
+
+
+def _list_best_checkpoint_entries(
+    output_dir: str,
+    metric_name: str,
+) -> list[dict[str, Any]]:
+    if not os.path.isdir(output_dir):
+        return []
+
+    entries: list[dict[str, Any]] = []
+    for child_name in os.listdir(output_dir):
+        child_path = os.path.join(output_dir, child_name)
+        match = _BEST_CHECKPOINT_DIR_RE.match(child_name)
+        if match is None or not os.path.isdir(child_path):
+            continue
+
+        metric_path = os.path.join(child_path, "best_metric.json")
+        if not os.path.isfile(metric_path):
+            logger.warning("Skipping %s: best_metric.json is missing",
+                           child_path)
+            continue
+
+        try:
+            with open(metric_path, encoding="utf-8") as f:
+                meta = json.load(f)
+            metric_raw = meta.get(metric_name)
+            if metric_raw is None:
+                metric_raw = meta.get("metric_value")
+            if metric_raw is None:
+                metric_raw = meta.get("mf_angle_err_mean")
+            step_raw = meta.get("step", int(match.group(1)))
+            metric_val = float(metric_raw)
+            step_val = int(step_raw)
+            if not math.isfinite(metric_val):
+                raise ValueError("metric is non-finite")
+        except Exception as exc:
+            logger.warning("Skipping %s: invalid best metric metadata (%s)",
+                           child_path,
+                           exc)
+            continue
+
+        entries.append({
+            "path": child_path,
+            "step": step_val,
+            "metric": metric_val,
+        })
+
+    entries.sort(key=lambda item: (float(item["metric"]), int(item["step"])))
+    return entries
+
+
+def _update_best_checkpoint_alias(output_dir: str,
+                                  best_checkpoint_path: str) -> None:
+    alias_path = os.path.join(output_dir, "checkpoint-best")
+    try:
+        if os.path.islink(alias_path) or os.path.isfile(alias_path):
+            os.unlink(alias_path)
+        elif os.path.isdir(alias_path):
+            shutil.rmtree(alias_path)
+        os.symlink(os.path.basename(best_checkpoint_path), alias_path)
+    except OSError as exc:
+        logger.warning("Failed to update checkpoint-best alias: %s", exc)
 
 
 def gather_state_dict_on_cpu_rank0(
@@ -187,6 +263,106 @@ def save_checkpoint(transformer,
         with open(config_path, "w") as f:
             json.dump(config_dict, f, indent=4)
         logger.info("--> checkpoint saved at step %s to %s", step, weight_path)
+
+
+def save_best_checkpoint(transformer,
+                         rank,
+                         output_dir,
+                         step,
+                         metric_value,
+                         metric_name="mf_angle_err_mean",
+                         optimizer=None,
+                         dataloader=None,
+                         scheduler=None,
+                         noise_generator=None,
+                         start_step=0,
+                         top_k=1,
+                         tracker=None) -> bool:
+    start_step = int(start_step or 0)
+    if start_step <= 0 or int(step) < start_step:
+        return False
+
+    try:
+        metric = float(metric_value)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(metric):
+        return False
+
+    top_k = max(1, int(top_k or 1))
+    metric_name = str(metric_name)
+
+    should_save = 0
+    if rank == 0:
+        entries = _list_best_checkpoint_entries(output_dir, metric_name)
+        if len(entries) < top_k:
+            should_save = 1
+        else:
+            worst_entry = entries[-1]
+            if metric < float(worst_entry["metric"]):
+                should_save = 1
+    should_save = _broadcast_int(should_save, src=0)
+    if should_save == 0:
+        return False
+
+    best_dir = os.path.join(output_dir, f"checkpoint-best-step-{step}")
+    if rank == 0 and os.path.isdir(best_dir):
+        shutil.rmtree(best_dir, ignore_errors=True)
+    if dist.is_available() and dist.is_initialized():
+        dist.barrier()
+
+    logger.info(
+        "%s=%.6f at step %s entered top-%s best checkpoints; saving.",
+        metric_name,
+        metric,
+        step,
+        top_k,
+    )
+    save_checkpoint(transformer,
+                    rank,
+                    output_dir=output_dir,
+                    step=f"best-step-{step}",
+                    optimizer=optimizer,
+                    dataloader=dataloader,
+                    scheduler=scheduler,
+                    noise_generator=noise_generator)
+
+    if rank == 0:
+        metric_meta = {
+            "step": int(step),
+            metric_name: metric,
+            "metric_name": metric_name,
+            "metric_value": metric,
+        }
+        if metric_name == "mf_angle_err_mean":
+            metric_meta["mf_angle_err_mean"] = metric
+        metric_path = os.path.join(best_dir, "best_metric.json")
+        with open(metric_path, "w", encoding="utf-8") as f:
+            json.dump(metric_meta, f, indent=2)
+
+        best_entries = _list_best_checkpoint_entries(output_dir, metric_name)
+        kept_entries = best_entries[:top_k]
+        for stale_entry in best_entries[top_k:]:
+            stale_path = stale_entry["path"]
+            logger.info("Removing non-top-k best checkpoint: %s", stale_path)
+            shutil.rmtree(stale_path, ignore_errors=True)
+
+        if kept_entries:
+            top_entry = kept_entries[0]
+            _update_best_checkpoint_alias(output_dir, top_entry["path"])
+            if tracker is not None:
+                tracker.log(
+                    {
+                        f"best/{metric_name}": float(top_entry["metric"]),
+                        "best/step": int(top_entry["step"]),
+                        "best/topk_count": len(kept_entries),
+                    },
+                    int(step),
+                )
+
+    if dist.is_available() and dist.is_initialized():
+        dist.barrier()
+    return True
 
 
 def save_distillation_checkpoint(

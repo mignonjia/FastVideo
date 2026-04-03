@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import torch.distributed as dist
 import torchvision
+from einops import rearrange
 from torch.utils.data import DataLoader
 
 from fastvideo.configs.sample import SamplingParam
@@ -27,6 +28,7 @@ from fastvideo.training.ptlflow_validation import (
     PTLFlowValidationHelper,
 )
 from fastvideo.training.training_pipeline import TrainingPipeline
+from fastvideo.training.training_utils import save_best_checkpoint
 from fastvideo.utils import is_vsa_available, shallow_asdict
 
 try:
@@ -42,6 +44,98 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
     A training pipeline for Matrix-Game-2.0.
     """
     _required_config_modules = ["scheduler", "transformer", "vae"]
+    _ACTION_PARAM_PATTERNS = ("action_model", )
+    _action_params_frozen_for_warmup: bool = False
+
+    def _set_action_params_grad(self, requires_grad: bool) -> int:
+        count = 0
+        modules = [self.transformer]
+        if getattr(self, "transformer_2", None) is not None:
+            modules.append(self.transformer_2)
+
+        for module in modules:
+            if module is None:
+                continue
+            for name, param in module.named_parameters():
+                if not any(pattern in name
+                           for pattern in self._ACTION_PARAM_PATTERNS):
+                    continue
+                param.requires_grad_(requires_grad)
+                count += 1
+        return count
+
+    def _on_train_start(self) -> None:
+        action_warmup_steps = max(0,
+                                  int(self.training_args.action_warmup_steps))
+        if action_warmup_steps <= 0:
+            return
+        count = self._set_action_params_grad(False)
+        self._action_params_frozen_for_warmup = True
+        logger.info(
+            "Action warmup enabled: freezing %d action parameter tensors for the first %d steps",
+            count,
+            action_warmup_steps,
+        )
+
+    def _before_train_step(self, step: int) -> None:
+        if not self._action_params_frozen_for_warmup:
+            return
+        if int(step) <= int(self.training_args.action_warmup_steps):
+            return
+        count = self._set_action_params_grad(True)
+        self._action_params_frozen_for_warmup = False
+        logger.info(
+            "Action warmup complete: unfroze %d action parameter tensors at step %d",
+            count,
+            int(step),
+        )
+
+    def _get_expected_action_dim(self, key: str) -> int:
+        action_config = getattr(self.transformer, "action_config", {}) or {}
+        return int(action_config.get(key, 0))
+
+    def _align_action_feature_dim(
+        self,
+        action: torch.Tensor | np.ndarray,
+        *,
+        name: str,
+        expected_dim: int,
+        context: str,
+    ) -> torch.Tensor | np.ndarray:
+        if expected_dim <= 0:
+            return action
+
+        actual_dim = int(action.shape[-1])
+        if actual_dim == expected_dim:
+            return action
+
+        if actual_dim > expected_dim:
+            extra = action[..., expected_dim:]
+            if torch.is_tensor(extra):
+                extra_is_zero = bool(torch.count_nonzero(extra).item() == 0)
+            else:
+                extra_is_zero = bool(np.count_nonzero(extra) == 0)
+
+            if extra_is_zero:
+                logger.warning(
+                    "%s feature dim mismatch in %s: got=%s expected=%s. "
+                    "Truncating trailing all-zero channels.",
+                    name,
+                    context,
+                    actual_dim,
+                    expected_dim,
+                )
+                return action[..., :expected_dim]
+
+            raise ValueError(
+                f"{name} feature dim mismatch in {context}: got={actual_dim}, "
+                f"expected={expected_dim}, and trailing channels are not all zero."
+            )
+
+        raise ValueError(
+            f"{name} feature dim mismatch in {context}: got={actual_dim}, "
+            f"expected={expected_dim}."
+        )
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         self.modules["scheduler"] = FlowUniPCMultistepScheduler(
@@ -76,6 +170,8 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
             num_gpus=training_args.num_gpus,
             dit_cpu_offload=True)
         self._ptlflow_validation = PTLFlowValidationHelper()
+        self._last_ptlflow_metric: float | None = None
+        self._last_ptlflow_metric_step: int | None = None
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         batch = next(self.train_loader_iter, None)  # type: ignore
@@ -119,6 +215,13 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
         if 'keyboard_cond' in batch and batch['keyboard_cond'].numel() > 0:
             training_batch.keyboard_cond = batch['keyboard_cond'].to(
                 get_local_torch_device(), dtype=torch.bfloat16)
+            training_batch.keyboard_cond = self._align_action_feature_dim(
+                training_batch.keyboard_cond,
+                name="keyboard_cond",
+                expected_dim=self._get_expected_action_dim(
+                    "keyboard_dim_in"),
+                context="training batch",
+            )
         else:
             training_batch.keyboard_cond = None
 
@@ -229,8 +332,15 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
         if "keyboard_cond" in validation_batch and validation_batch[
                 "keyboard_cond"] is not None:
             keyboard_cond = validation_batch["keyboard_cond"]
-            keyboard_cond = torch.tensor(
+            keyboard_cond = self._align_action_feature_dim(
                 keyboard_cond[:sampling_param.num_frames],
+                name="keyboard_cond",
+                expected_dim=self._get_expected_action_dim(
+                    "keyboard_dim_in"),
+                context="validation batch",
+            )
+            keyboard_cond = torch.tensor(
+                keyboard_cond,
                 dtype=torch.bfloat16,
             )
             keyboard_cond = keyboard_cond.unsqueeze(0)
@@ -265,6 +375,8 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
     def _log_validation(self, transformer, training_args, global_step) -> None:
         training_args.inference_mode = True
         training_args.dit_cpu_offload = False
+        self._last_ptlflow_metric = None
+        self._last_ptlflow_metric_step = None
         if not training_args.log_validation:
             return
         if self.validation_pipeline is None:
@@ -297,7 +409,6 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
                 "Rank %s failed to build validation dataset, will skip validation this round. err=%s",
                 self.global_rank,
                 local_validation_error,
-                local_main_process_only=False,
             )
 
         validation_ok = torch.tensor(
@@ -540,6 +651,12 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
                             metric_logs[f"metrics/{metric_key}"] = value
                         if metric_logs:
                             self.tracker.log(metric_logs, global_step)
+                        latest_metric = metric_logs.get(
+                            "metrics/mf_angle_err_mean")
+                        if latest_metric is not None and np.isfinite(
+                                latest_metric):
+                            self._last_ptlflow_metric = float(latest_metric)
+                            self._last_ptlflow_metric_step = int(global_step)
 
             elif self.rank_in_sp_group == 0:
                 world_group.send_object(step_videos, dst=0)
@@ -549,10 +666,54 @@ class MatrixGameTrainingPipeline(TrainingPipeline):
                 world_group.send_object(step_audio, dst=0)
                 world_group.send_object(step_sample_rates, dst=0)
 
+        if dist.is_available() and dist.is_initialized():
+            backend = dist.get_backend()
+            use_cuda = backend == "nccl" and torch.cuda.is_available()
+            metric_device = torch.device("cuda") if use_cuda else torch.device(
+                "cpu")
+            metric_state = torch.tensor(
+                [
+                    1.0 if self._last_ptlflow_metric_step == int(global_step)
+                    and self._last_ptlflow_metric is not None else 0.0,
+                    float(self._last_ptlflow_metric or 0.0),
+                ],
+                dtype=torch.float32,
+                device=metric_device,
+            )
+            dist.broadcast(metric_state, src=0)
+            if int(metric_state[0].item()) == 1:
+                self._last_ptlflow_metric = float(metric_state[1].item())
+                self._last_ptlflow_metric_step = int(global_step)
+            else:
+                self._last_ptlflow_metric = None
+                self._last_ptlflow_metric_step = None
+
         training_args.inference_mode = False
         self.transformer.train()
         if getattr(self, "transformer_2", None) is not None:
             self.transformer_2.train()
+
+    def _after_validation(self, step: int) -> None:
+        if self._last_ptlflow_metric_step != int(step):
+            return
+        save_best_checkpoint(
+            self.transformer,
+            self.global_rank,
+            self.training_args.output_dir,
+            step=int(step),
+            metric_value=self._last_ptlflow_metric,
+            metric_name="mf_angle_err_mean",
+            optimizer=self.optimizer,
+            dataloader=self.train_dataloader,
+            scheduler=self.lr_scheduler,
+            noise_generator=self.noise_random_generator,
+            start_step=int(
+                getattr(self.training_args, "best_checkpoint_start_step", 0)
+                or 0),
+            top_k=int(
+                getattr(self.training_args, "best_checkpoint_top_k", 1) or 1),
+            tracker=self.tracker if self.global_rank == 0 else None,
+        )
 
 
 def main(args) -> None:
@@ -566,6 +727,7 @@ def main(args) -> None:
 
 
 if __name__ == "__main__":
+    import sys
     argv = sys.argv
     from fastvideo.fastvideo_args import TrainingArgs
     from fastvideo.utils import FlexibleArgumentParser

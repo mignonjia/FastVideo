@@ -195,13 +195,13 @@ class ValidationDataset(IterableDataset):
                 else:
                     try:
                         action_data = np.load(action_path, allow_pickle=True)
-                        num_frames = sample["num_frames"]
-                        if action_data.dtype == object: action_data = action_data.item()
+                        if action_data.dtype == object:
+                            action_data = action_data.item()
                         if isinstance(action_data, dict):
-                            sample["keyboard_cond"] = action_data["keyboard"][:num_frames]
-                            sample["mouse_cond"] = action_data["mouse"][:num_frames]
+                            sample["keyboard_cond"] = action_data["keyboard"]
+                            sample["mouse_cond"] = action_data["mouse"]
                         else:
-                            sample["keyboard_cond"] = action_data[:num_frames]
+                            sample["keyboard_cond"] = action_data
                     except Exception as e:
                         logger.error("Error loading action file %s: %s",
                                         action_path, e)

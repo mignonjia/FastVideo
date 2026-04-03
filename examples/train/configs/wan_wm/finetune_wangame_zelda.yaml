@@ -43,22 +43,22 @@ training:
     lr_warmup_steps: 0
 
   loop:
-    max_train_steps: 120000
+    max_train_steps: 20000
     gradient_accumulation_steps: 1
 
   checkpoint:
-    output_dir: /mnt/data/world_model/zelda_runs/wangame_1.3b_zelda_clean_init_with_warm_up_81_frames
-    training_state_checkpointing_steps: 10000
-    checkpoints_total_limit: 3
+    output_dir: /mnt/data/world_model/zelda_runs/wangame_1.3b_sft_refactor_test
+    training_state_checkpointing_steps: 100000
+    checkpoints_total_limit: 0
     best_checkpoint_start_step: 1
-    best_checkpoint_top_k: 15
+    best_checkpoint_top_k: 0
 
   tracker:
     project_name: wangame_1.3b_zelda
-    run_name: Zelda_clean_init_with_warm_up_81_frames
+    run_name: Zelda_sft_refactor_test
 
   model:
-    enable_gradient_checkpointing_type: full
+    enable_gradient_checkpointing_type: false
 
   dit_precision: fp32
 

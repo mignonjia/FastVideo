@@ -3,7 +3,7 @@
 #
 # Usage:
 #   bash examples/train/run.sh <config.yaml> [--dotted.key value ...]
-#
+# 
 # Examples:
 #   bash examples/train/run.sh examples/train/finetune_wan2.1_t2v_1.3B_vsa_phase3.4_0.9sparsity.yaml
 #   bash examples/train/run.sh examples/train/configs/dfsft_wangame_causal_v3.yaml --dry-run
@@ -40,11 +40,15 @@ LOG_DIR="${LOG_DIR:-examples/train}"
 mkdir -p "${LOG_DIR}"
 LOG_FILE="${LOG_DIR}/${CONFIG_NAME}_${TIMESTAMP}.log"
 
-set +u
-source ~/conda/miniconda/bin/activate
+# Initialize Conda explicitly for non-interactive shells.
+if [ -f /opt/conda/etc/profile.d/conda.sh ]; then
+  source /opt/conda/etc/profile.d/conda.sh
+else
+  eval "$(/opt/conda/bin/conda shell.bash hook)"
+fi
 conda activate mhuo-fv
-set -u
-export PYTHONPATH="/mnt/weka/home/hao.zhang/mhuo/FastVideo-refactor:${PYTHONPATH:-}"
+
+export PYTHONPATH="/mnt/home/mhuo/FastVideo-refactor:${PYTHONPATH:-}"
 
 echo "=== Train Training ==="
 echo "Config:      ${CONFIG}"

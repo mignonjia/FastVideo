@@ -1,9 +1,9 @@
 models:
   student:
     _target_: fastvideo.train.models.wangame.WanGameCausalModel
-    init_from: /mnt/data/world_model/zelda_runs/wangame_self_forcing_zelda/checkpoint-best-step-5600-diffusers
+    init_from: /mnt/data/world_model/wangame_zelda
     trainable: true
-    transformer_override_safetensor: /mnt/data/world_model/zelda_runs/wangame_dfsft_zelda/checkpoint-50000-diffusers/transformer/model.safetensors
+    # transformer_override_safetensor: /mnt/data/world_model/zelda_runs/wangame_sf_zelda_with_longer_dfsft/checkpoint-2000-diffusers/transformer/model.safetensors
   teacher:
     _target_: fastvideo.train.models.wangame.WanGameModel
     init_from: /mnt/data/world_model/WanGame-2.1-0325-60k-steps
@@ -63,7 +63,7 @@ training:
     lr_warmup_steps: 0
 
   loop:
-    max_train_steps: 10000
+    max_train_steps: 0
     gradient_accumulation_steps: 1
 
   checkpoint:
@@ -92,7 +92,7 @@ callbacks:
     sampling_timesteps: [1000, 750, 500, 250]
     num_frames: 33
     guidance_scale: 1.0
-    evaluate_ptlflow: true
+    evaluate_ptlflow: false
     ptlflow_dir: /mnt/home/mhuo/ptlflow
 
 pipeline:

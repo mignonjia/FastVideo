@@ -7,10 +7,10 @@
 models:
   student:
     _target_: fastvideo.train.models.wangame.WanGameModel
-    init_from: weizhou03/Wan2.1-Game-Fun-1.3B-InP-Diffusers
+    init_from: mignonjia/wangame_bidirectional_zelda
     trainable: true
     action_warmup_steps: 0
-    transformer_override_safetensor: /mnt/data/world_model/ckpts/zelda_mc_warmup_20k.safetensors
+    # transformer_override_safetensor: /mnt/data/world_model/ckpts/zelda_mc_warmup_20k.safetensors
 
 method:
   _target_: fastvideo.train.methods.fine_tuning.finetune.FineTuneMethod
@@ -43,7 +43,7 @@ training:
     lr_warmup_steps: 0
 
   loop:
-    max_train_steps: 20000
+    max_train_steps: 0
     gradient_accumulation_steps: 1
 
   checkpoint:
@@ -75,7 +75,7 @@ callbacks:
     guidance_scale: 1.0
     num_frames: 33
     num_samples: 16
-    evaluate_ptlflow: true
+    evaluate_ptlflow: false
     ptlflow_dir: /mnt/home/mhuo/ptlflow
 
 pipeline:

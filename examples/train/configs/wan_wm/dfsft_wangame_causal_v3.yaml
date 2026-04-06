@@ -6,7 +6,7 @@
 models:
   student:
     _target_: fastvideo.train.models.wangame.WanGameCausalModel
-    init_from: /mnt/data/world_model/WanGame-2.1-0325-60k-steps
+    init_from: mignonjia/wangame_causal_zelda
     trainable: true
     # transformer_override_safetensor: /mnt/data/world_model/zelda_runs/wangame_1.3b_zelda_wasd_with_warm_up/checkpoint-60000/transformer/diffusion_pytorch_model.safetensors
 
@@ -20,11 +20,11 @@ method:
 
 training:
   distributed:
-    num_gpus: 32
+    num_gpus: 16
     sp_size: 1
     tp_size: 1
     hsdp_replicate_dim: 1
-    hsdp_shard_dim: 32
+    hsdp_shard_dim: 16
 
   data:
     data_path: >-
@@ -48,7 +48,7 @@ training:
     lr_warmup_steps: 0
 
   loop:
-    max_train_steps: 60000
+    max_train_steps: 0
     gradient_accumulation_steps: 1
 
   checkpoint:
@@ -83,7 +83,8 @@ callbacks:
     scheduler_target: fastvideo.models.schedulers.scheduling_flow_match_euler_discrete.FlowMatchEulerDiscreteScheduler
     guidance_scale: 1.0
     num_frames: 33
-    evaluate_ptlflow: true
+    num_samples: 16
+    evaluate_ptlflow: false
     ptlflow_dir: /mnt/home/mhuo/ptlflow
 
 pipeline:

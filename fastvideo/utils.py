@@ -396,6 +396,30 @@ def get_lock(model_name_or_path: str):
     return lock
 
 
+def _hf_local_retry_dir(model_name_or_path: str) -> str:
+    """Build a node-local fallback directory for HF downloads."""
+    base_dir = os.environ.get("FASTVIDEO_HF_LOCAL_DIR")
+    if not base_dir:
+        base_dir = os.path.join(tempfile.gettempdir(), "fastvideo-hf-cache")
+
+    model_name = model_name_or_path.replace("/", "-")
+    hash_name = hashlib.sha256(model_name.encode()).hexdigest()[:12]
+    local_dir = os.path.join(base_dir, f"{model_name}-{hash_name}")
+    os.makedirs(local_dir, exist_ok=True)
+    return local_dir
+
+
+def _is_stale_file_handle_error(exc: BaseException) -> bool:
+    current: BaseException | None = exc
+    while current is not None:
+        if isinstance(current, OSError) and current.errno == 116:
+            return True
+        if "Stale file handle" in str(current):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
 def warn_for_unimplemented_methods(cls: type[T]) -> type[T]:
     """
     A replacement for `abc.ABC`.
@@ -523,6 +547,22 @@ def maybe_download_model(model_name_or_path: str,
         logger.info("Downloaded model to %s", local_path)
         return str(local_path)
     except Exception as e:
+        if local_dir is None and _is_stale_file_handle_error(e):
+            fallback_dir = _hf_local_retry_dir(model_name_or_path)
+            logger.warning(
+                "HF download for %s hit a stale file handle in the shared cache; "
+                "retrying with node-local directory %s",
+                model_name_or_path,
+                fallback_dir,
+            )
+            with get_lock(f"{model_name_or_path}@{fallback_dir}"):
+                local_path = snapshot_download(
+                    repo_id=model_name_or_path,
+                    ignore_patterns=["*.onnx", "*.msgpack"],
+                    local_dir=fallback_dir)
+            logger.info("Downloaded model to %s after node-local retry",
+                        local_path)
+            return str(local_path)
         raise ValueError(
             f"Could not find model at {model_name_or_path} and failed to download from HF Hub: {e}"
         ) from e

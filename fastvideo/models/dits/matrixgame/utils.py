@@ -486,6 +486,21 @@ def _matrixgame_overlay_keys_from_keyboard(
     return {"W": False, "S": False, "A": False, "D": False}
 
 
+def swap_mouse_axes_for_validation(
+    mouse_cond: np.ndarray | torch.Tensor,
+) -> np.ndarray:
+    mouse_arr = np.asarray(mouse_cond)
+    swapped = np.array(mouse_arr, copy=True)
+    if swapped.ndim < 1 or swapped.shape[-1] < 2:
+        return swapped
+
+    pitch = np.array(swapped[..., 0], copy=True)
+    yaw = np.array(swapped[..., 1], copy=True)
+    swapped[..., 0] = -yaw
+    swapped[..., 1] = -pitch
+    return swapped
+
+
 def draw_rounded_rectangle(
     image: np.ndarray,
     top_left: tuple[int, int],
@@ -643,6 +658,7 @@ def overlay_validation_actions_on_frames(
         mouse_cond = np.asarray(mouse_cond, dtype=np.float32)
         if mouse_cond.ndim == 3 and mouse_cond.shape[0] == 1:
             mouse_cond = mouse_cond[0]
+        mouse_cond = swap_mouse_axes_for_validation(mouse_cond)
 
     processed_frames: list[np.ndarray] = []
     for frame_idx, frame in enumerate(frames):

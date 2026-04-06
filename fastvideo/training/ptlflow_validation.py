@@ -13,6 +13,7 @@ import torch
 
 from fastvideo.fastvideo_args import TrainingArgs
 from fastvideo.logger import init_logger
+from fastvideo.models.dits.matrixgame.utils import swap_mouse_axes_for_validation
 
 logger = init_logger(__name__)
 
@@ -241,22 +242,35 @@ class PTLFlowValidationHelper:
         n_use = min(n_frames, n_keyboard, n_mouse)
         if n_use <= 0:
             return action_path
-        if n_use == n_keyboard and n_use == n_mouse:
+        swapped_mouse_arr = swap_mouse_axes_for_validation(mouse_arr)
+        swapped_mouse_axes = not np.array_equal(
+            swapped_mouse_arr[:n_use],
+            mouse_arr[:n_use],
+        )
+        should_save = (
+            n_use != n_keyboard
+            or n_use != n_mouse
+            or swapped_mouse_axes
+        )
+        if not should_save:
             return action_path
 
         aligned_actions = dict(actions_obj)
         aligned_actions["keyboard"] = keyboard_arr[:n_use]
-        aligned_actions["mouse"] = mouse_arr[:n_use]
+        aligned_actions["mouse"] = swapped_mouse_arr[:n_use]
 
         os.makedirs(eval_output_dir, exist_ok=True)
         aligned_path = os.path.join(eval_output_dir, "actions_aligned.npy")
         np.save(aligned_path, aligned_actions, allow_pickle=True)
         logger.info(
-            "Aligned action file for PTLFlow: video_frames=%d keyboard=%d mouse=%d used=%d path=%s",
+            "Prepared action file for PTLFlow: "
+            "video_frames=%d keyboard=%d mouse=%d used=%d "
+            "swapped_mouse_axes=%s path=%s",
             n_frames,
             n_keyboard,
             n_mouse,
             n_use,
+            swapped_mouse_axes,
             aligned_path,
         )
         return aligned_path

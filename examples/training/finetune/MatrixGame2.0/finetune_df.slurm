@@ -1,8 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=mg-df
-#SBATCH --partition=main
-#SBATCH --nodes=2
-#SBATCH --ntasks=2
+#SBATCH --nodes=4
+#SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -14,12 +13,17 @@
 set -e -x
 
 # Environment Setup
-source ~/conda/miniconda/bin/activate
-conda activate /mnt/weka/home/hao.zhang/conda/miniconda/envs/alexfv
-export PYTHONPATH="/mnt/weka/home/hao.zhang/kaiqin/FastVideo_clean:$PYTHONPATH"
+if [ -f /opt/conda/etc/profile.d/conda.sh ]; then
+  source /opt/conda/etc/profile.d/conda.sh
+else
+  eval "$(/opt/conda/bin/conda shell.bash hook)"
+fi
+conda activate mhuo-fv
+
+export PYTHONPATH="/mnt/home/mhuo/FastVideo-MG:${PYTHONPATH:-}"
 
 # Basic Info
-export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
+export WANDB_API_KEY="d5b02b05e30d8cb34c7b31c6ae10416fc26dcb66"
 export WANDB_MODE="online"
 export NCCL_P2P_DISABLE=1
 export MASTER_PORT=29500
@@ -35,35 +39,43 @@ RUN_NAME=$(date +"%m%d_%H%M")
 echo "RUN_NAME: $RUN_NAME"
 
 # Configs
-MODEL_PATH="../mg_models/Solaris-30K-8K"
-DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f/preprocessed_0308"
-VALIDATION_DATASET_FILE="examples/training/finetune/MatrixGame2.0/validation.json"
+MODEL_PATH="/mnt/data/world_model/mg_zelda_df"
+DATA_DIR="/mnt/data/world_model/zelda_data/zeldam2-v2"
+VALIDATION_DATASET_FILE="/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/validation_zelda.json"
+RUN_NAME="mg_zelda_init_from_bi_68500"
+OUTPUT_DIR="/mnt/data/world_model/zelda_runs/checkpoints/$RUN_NAME"
+CKPT_PATH="/mnt/data/world_model/zelda_runs/mg_finetune_zelda_no_warmup/checkpoint-best-step-68500-df-init/transformer/diffusion_pytorch_model.safetensors"
+
+# Configs
+NUM_GPUS=8
+NUM_NODES=4
+NUM_TOTAL_GPUS=$((NUM_GPUS * NUM_NODES))
 
 # Training arguments
 training_args=(
-  --tracker_project_name "mg_finetune_solaris_df"
-  --output_dir "checkpoints/matrixgame_df_${RUN_NAME}"
-  --wandb_run_name "${RUN_NAME}_df_test"
-  --max_train_steps 20000
+  --tracker_project_name "distillation_wangame_r"
+  --output_dir $OUTPUT_DIR
+  --wandb_run_name $RUN_NAME
+  --max_train_steps 60000
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 2
-  --num_latent_t 21
-  --num_height 352
-  --num_width 640
-  --num_frames 81
+  --gradient_accumulation_steps 1
+  --num_latent_t 9
+  --num_height 480
+  --num_width 832
+  --num_frames 33
   --num_frame_per_block 3
   # --enable_gradient_checkpointing_type "full"
-  # --init_weights_from_safetensors $CKPT_PATH
+  --init_weights_from_safetensors $CKPT_PATH
 )
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 16
+  --num_gpus $NUM_TOTAL_GPUS
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
-  --hsdp_shard_dim 16
+  --hsdp_shard_dim $NUM_TOTAL_GPUS
 )
 
 # Model arguments
@@ -84,6 +96,8 @@ dataset_args=(
 # Validation arguments
 validation_args=(
   --log_validation
+  --evaluate_ptlflow
+  --ptlflow_dir "/mnt/home/mhuo/ptlflow"
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
   --validation_steps 500
   --validation_sampling_steps "50"
@@ -92,11 +106,11 @@ validation_args=(
 
 # Optimizer arguments
 optimizer_args=(
-  --learning_rate 1e-4
+  --learning_rate 2e-5
   --betas "0.9,0.95"
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 2000
-  --training_state_checkpointing_steps 2000
+  --weight_only_checkpointing_steps 10000
+  --training_state_checkpointing_steps 10000
   --weight_decay 0
   --max_grad_norm 1.0
 )
@@ -104,19 +118,19 @@ optimizer_args=(
 # Miscellaneous arguments
 miscellaneous_args=(
   --inference_mode False
-  --checkpoints_total_limit 3
+  --checkpoints_total_limit 10
+  --best_checkpoint_start_step 1
+  --best_checkpoint_top_k 10
   --training_cfg_rate 0.1
   --dit_precision "fp32"
 )
 
 mkdir -p finetune_df_output
 
-srun torchrun \
---nnodes $SLURM_JOB_NUM_NODES \
---nproc_per_node 8 \
---node_rank $SLURM_PROCID \
---rdzv_backend=c10d \
---rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
+if [ $NUM_NODES -eq 1 ]; then
+  torchrun \
+    --nnodes $NUM_NODES \
+    --nproc_per_node $NUM_GPUS \
     fastvideo/training/matrixgame_ar_diffusion_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
@@ -125,3 +139,19 @@ srun torchrun \
     "${optimizer_args[@]}" \
     "${validation_args[@]}" \
     "${miscellaneous_args[@]}"
+else
+  srun torchrun \
+  --nnodes $SLURM_JOB_NUM_NODES \
+  --nproc_per_node 8 \
+  --node_rank $SLURM_PROCID \
+  --rdzv_backend=c10d \
+  --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
+      fastvideo/training/matrixgame_ar_diffusion_pipeline.py \
+      "${parallel_args[@]}" \
+      "${model_args[@]}" \
+      "${dataset_args[@]}" \
+      "${training_args[@]}" \
+      "${optimizer_args[@]}" \
+      "${validation_args[@]}" \
+      "${miscellaneous_args[@]}"
+fi

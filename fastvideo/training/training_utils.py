@@ -365,6 +365,135 @@ def save_best_checkpoint(transformer,
     return True
 
 
+def save_best_distillation_checkpoint(
+        generator_transformer,
+        fake_score_transformer,
+        rank,
+        output_dir,
+        step,
+        metric_value,
+        metric_name="mf_angle_err_mean",
+        generator_optimizer=None,
+        fake_score_optimizer=None,
+        dataloader=None,
+        generator_scheduler=None,
+        fake_score_scheduler=None,
+        noise_generator=None,
+        start_step=0,
+        top_k=1,
+        tracker=None,
+        generator_ema=None,
+        only_save_generator_weight=False,
+        generator_transformer_2=None,
+        real_score_transformer_2=None,
+        fake_score_transformer_2=None,
+        generator_optimizer_2=None,
+        fake_score_optimizer_2=None,
+        generator_scheduler_2=None,
+        fake_score_scheduler_2=None,
+        generator_ema_2=None) -> bool:
+    start_step = int(start_step or 0)
+    if start_step <= 0 or int(step) < start_step:
+        return False
+
+    try:
+        metric = float(metric_value)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(metric):
+        return False
+
+    top_k = max(1, int(top_k or 1))
+    metric_name = str(metric_name)
+
+    should_save = 0
+    if rank == 0:
+        entries = _list_best_checkpoint_entries(output_dir, metric_name)
+        if len(entries) < top_k:
+            should_save = 1
+        else:
+            worst_entry = entries[-1]
+            if metric < float(worst_entry["metric"]):
+                should_save = 1
+    should_save = _broadcast_int(should_save, src=0)
+    if should_save == 0:
+        return False
+
+    best_dir = os.path.join(output_dir, f"checkpoint-best-step-{step}")
+    if rank == 0 and os.path.isdir(best_dir):
+        shutil.rmtree(best_dir, ignore_errors=True)
+    if dist.is_available() and dist.is_initialized():
+        dist.barrier()
+
+    logger.info(
+        "%s=%.6f at step %s entered top-%s best distillation checkpoints; saving.",
+        metric_name,
+        metric,
+        step,
+        top_k,
+    )
+    save_distillation_checkpoint(
+        generator_transformer,
+        fake_score_transformer,
+        rank,
+        output_dir=output_dir,
+        step=f"best-step-{step}",
+        generator_optimizer=generator_optimizer,
+        fake_score_optimizer=fake_score_optimizer,
+        dataloader=dataloader,
+        generator_scheduler=generator_scheduler,
+        fake_score_scheduler=fake_score_scheduler,
+        noise_generator=noise_generator,
+        generator_ema=generator_ema,
+        only_save_generator_weight=only_save_generator_weight,
+        generator_transformer_2=generator_transformer_2,
+        real_score_transformer_2=real_score_transformer_2,
+        fake_score_transformer_2=fake_score_transformer_2,
+        generator_optimizer_2=generator_optimizer_2,
+        fake_score_optimizer_2=fake_score_optimizer_2,
+        generator_scheduler_2=generator_scheduler_2,
+        fake_score_scheduler_2=fake_score_scheduler_2,
+        generator_ema_2=generator_ema_2,
+    )
+
+    if rank == 0:
+        metric_meta = {
+            "step": int(step),
+            metric_name: metric,
+            "metric_name": metric_name,
+            "metric_value": metric,
+        }
+        if metric_name == "mf_angle_err_mean":
+            metric_meta["mf_angle_err_mean"] = metric
+        metric_path = os.path.join(best_dir, "best_metric.json")
+        with open(metric_path, "w", encoding="utf-8") as f:
+            json.dump(metric_meta, f, indent=2)
+
+        best_entries = _list_best_checkpoint_entries(output_dir, metric_name)
+        kept_entries = best_entries[:top_k]
+        for stale_entry in best_entries[top_k:]:
+            stale_path = stale_entry["path"]
+            logger.info("Removing non-top-k best checkpoint: %s", stale_path)
+            shutil.rmtree(stale_path, ignore_errors=True)
+
+        if kept_entries:
+            top_entry = kept_entries[0]
+            _update_best_checkpoint_alias(output_dir, top_entry["path"])
+            if tracker is not None:
+                tracker.log(
+                    {
+                        f"best/{metric_name}": float(top_entry["metric"]),
+                        "best/step": int(top_entry["step"]),
+                        "best/topk_count": len(kept_entries),
+                    },
+                    int(step),
+                )
+
+    if dist.is_available() and dist.is_initialized():
+        dist.barrier()
+    return True
+
+
 def save_distillation_checkpoint(
         generator_transformer,
         fake_score_transformer,

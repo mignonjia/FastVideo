@@ -21,9 +21,11 @@ from fastvideo.pipelines.basic.matrixgame.matrixgame_causal_dmd_pipeline import 
     MatrixGameCausalDMDPipeline,
 )
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
+from fastvideo.training.ptlflow_validation import PTLFlowValidationHelper
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
     clip_grad_norm_while_handling_failing_dtensor_cases,
+    save_best_checkpoint,
 )
 from fastvideo.utils import shallow_asdict
 
@@ -33,6 +35,53 @@ logger = init_logger(__name__)
 class MatrixGameARDiffusionPipeline(TrainingPipeline):
 
     _required_config_modules = ["scheduler", "transformer", "vae"]
+
+    def _get_expected_action_dim(self, key: str) -> int:
+        action_config = getattr(self.transformer, "action_config", {}) or {}
+        return int(action_config.get(key, 0))
+
+    def _align_action_feature_dim(
+        self,
+        action: torch.Tensor | np.ndarray,
+        *,
+        name: str,
+        expected_dim: int,
+        context: str,
+    ) -> torch.Tensor | np.ndarray:
+        if expected_dim <= 0:
+            return action
+
+        actual_dim = int(action.shape[-1])
+        if actual_dim == expected_dim:
+            return action
+
+        if actual_dim > expected_dim:
+            extra = action[..., expected_dim:]
+            if torch.is_tensor(extra):
+                extra_is_zero = bool(torch.count_nonzero(extra).item() == 0)
+            else:
+                extra_is_zero = bool(np.count_nonzero(extra) == 0)
+
+            if extra_is_zero:
+                logger.warning(
+                    "%s feature dim mismatch in %s: got=%s expected=%s. "
+                    "Truncating trailing all-zero channels.",
+                    name,
+                    context,
+                    actual_dim,
+                    expected_dim,
+                )
+                return action[..., :expected_dim]
+
+            raise ValueError(
+                f"{name} feature dim mismatch in {context}: got={actual_dim}, "
+                f"expected={expected_dim}, and trailing channels are not all zero."
+            )
+
+        raise ValueError(
+            f"{name} feature dim mismatch in {context}: got={actual_dim}, "
+            f"expected={expected_dim}."
+        )
 
     def initialize_pipeline(self, fastvideo_args: FastVideoArgs):
         self.modules["scheduler"] = DiffusionForcingScheduler(
@@ -169,6 +218,9 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
             pin_cpu_memory=training_args.pin_cpu_memory,
             dit_cpu_offload=True,
         )
+        self._ptlflow_validation = PTLFlowValidationHelper()
+        self._last_ptlflow_metric: float | None = None
+        self._last_ptlflow_metric_step: int | None = None
 
     def _get_timestep(
         self,
@@ -264,6 +316,12 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
         if "keyboard_cond" in batch and batch["keyboard_cond"].numel() > 0:
             training_batch.keyboard_cond = batch["keyboard_cond"].to(
                 get_local_torch_device(), dtype=torch.bfloat16
+            )
+            training_batch.keyboard_cond = self._align_action_feature_dim(
+                training_batch.keyboard_cond,
+                name="keyboard_cond",
+                expected_dim=self._get_expected_action_dim("keyboard_dim_in"),
+                context="training batch",
             )
         else:
             training_batch.keyboard_cond = None
@@ -535,6 +593,12 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
             and validation_batch["keyboard_cond"] is not None
         ):
             keyboard_cond = validation_batch["keyboard_cond"]
+            keyboard_cond = self._align_action_feature_dim(
+                keyboard_cond,
+                name="keyboard_cond",
+                expected_dim=self._get_expected_action_dim("keyboard_dim_in"),
+                context="validation batch",
+            )
             keyboard_cond = torch.tensor(keyboard_cond, dtype=torch.bfloat16)
             keyboard_cond = keyboard_cond.unsqueeze(0)
             batch.keyboard_cond = keyboard_cond
@@ -561,6 +625,28 @@ class MatrixGameARDiffusionPipeline(TrainingPipeline):
             frames,
             keyboard_cond=getattr(batch, "keyboard_cond", None),
             mouse_cond=getattr(batch, "mouse_cond", None),
+        )
+
+    def _after_validation(self, step: int) -> None:
+        if self._last_ptlflow_metric_step != int(step):
+            return
+        save_best_checkpoint(
+            self.transformer,
+            self.global_rank,
+            self.training_args.output_dir,
+            step=int(step),
+            metric_value=self._last_ptlflow_metric,
+            metric_name="mf_angle_err_mean",
+            optimizer=self.optimizer,
+            dataloader=self.train_dataloader,
+            scheduler=self.lr_scheduler,
+            noise_generator=self.noise_random_generator,
+            start_step=int(
+                getattr(self.training_args, "best_checkpoint_start_step", 0)
+                or 0),
+            top_k=int(
+                getattr(self.training_args, "best_checkpoint_top_k", 1) or 1),
+            tracker=self.tracker if self.global_rank == 0 else None,
         )
 
 

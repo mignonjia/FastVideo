@@ -12,6 +12,7 @@ from typing import Any, cast
 import imageio
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 import torchvision
 from einops import rearrange
@@ -36,6 +37,8 @@ from fastvideo.pipelines import (ComposedPipelineBase, ForwardBatch,
                                  TrainingBatch)
 from fastvideo.training.activation_checkpoint import (
     apply_activation_checkpointing)
+from fastvideo.training.ptlflow_validation import (PTLFLOW_SCALAR_KEYS,
+                                                   PTLFlowValidationHelper)
 from fastvideo.training.training_pipeline import TrainingPipeline
 from fastvideo.training.training_utils import (
     EMA_FSDP, clip_grad_norm_while_handling_failing_dtensor_cases,
@@ -1189,6 +1192,8 @@ class DistillationPipeline(TrainingPipeline):
     def _log_validation(self, transformer, training_args, global_step) -> None:
         training_args.inference_mode = True
         training_args.dit_cpu_offload = True
+        self._last_ptlflow_metric = None
+        self._last_ptlflow_metric_step = None
         if not training_args.log_validation:
             return
         if self.validation_pipeline is None:
@@ -1247,6 +1252,7 @@ class DistillationPipeline(TrainingPipeline):
         validation_steps = training_args.validation_sampling_steps.split(",")
         validation_steps = [int(step) for step in validation_steps]
         validation_steps = [step for step in validation_steps if step > 0]
+        evaluate_ptlflow = bool(getattr(training_args, "evaluate_ptlflow", False))
         # Log validation results for this step
         world_group = get_world_group()
         num_sp_groups = world_group.world_size // self.sp_group.world_size
@@ -1259,20 +1265,25 @@ class DistillationPipeline(TrainingPipeline):
             step_videos: list[np.ndarray] = []
             step_captions: list[str] = []
             step_ref_videos: list[str | None] = []
+            step_action_paths: list[str | None] = []
 
             # Helper function to run validation with optional EMA contexts
             def run_validation_with_ema(
                 steps: int
             ) -> tuple[list[np.ndarray], list[str], list[str | None],
-                       list[Any], list[Any]]:
+                       list[str | None], list[Any], list[Any]]:
                 videos: list[np.ndarray] = []
                 captions: list[str] = []
                 ref_videos: list[str | None] = []
+                action_paths: list[str | None] = []
                 audios: list[Any] = []
                 audio_sample_rates: list[Any] = []
                 for validation_batch in validation_dataloader:
                     batch = self._prepare_validation_batch(
                         sampling_param, training_args, validation_batch, steps)
+                    action_path = validation_batch.get("action_path")
+                    if not isinstance(action_path, str):
+                        action_path = None
 
                     if hasattr(self.validation_pipeline,
                                "prompt_encoding_stage"):
@@ -1302,6 +1313,7 @@ class DistillationPipeline(TrainingPipeline):
                         batch.prompt, str)
                     captions.append(batch.prompt)
                     ref_videos.append(validation_batch.get("ref_video"))
+                    action_paths.append(action_path)
 
                     # Run validation inference
                     with torch.no_grad():
@@ -1324,27 +1336,28 @@ class DistillationPipeline(TrainingPipeline):
                     audio_sample_rates.append(
                         output_batch.extra.get("audio_sample_rate"))
 
-                return videos, captions, ref_videos, audios, audio_sample_rates
+                return (videos, captions, ref_videos, action_paths, audios,
+                        audio_sample_rates)
 
             # Apply EMA contexts if available (nested context managers)
             if ema_context is not None and ema_2_context is not None:
                 with ema_context, ema_2_context:
-                    (step_videos, step_captions, step_ref_videos, step_audios,
-                     step_audio_sample_rates
+                    (step_videos, step_captions, step_ref_videos,
+                     step_action_paths, step_audios, step_audio_sample_rates
                      ) = run_validation_with_ema(num_inference_steps)
             elif ema_context is not None:
                 with ema_context:
-                    (step_videos, step_captions, step_ref_videos, step_audios,
-                     step_audio_sample_rates
+                    (step_videos, step_captions, step_ref_videos,
+                     step_action_paths, step_audios, step_audio_sample_rates
                      ) = run_validation_with_ema(num_inference_steps)
             elif ema_2_context is not None:
                 with ema_2_context:
-                    (step_videos, step_captions, step_ref_videos, step_audios,
-                     step_audio_sample_rates
+                    (step_videos, step_captions, step_ref_videos,
+                     step_action_paths, step_audios, step_audio_sample_rates
                      ) = run_validation_with_ema(num_inference_steps)
             else:
-                (step_videos, step_captions, step_ref_videos, step_audios,
-                 step_audio_sample_rates
+                (step_videos, step_captions, step_ref_videos,
+                 step_action_paths, step_audios, step_audio_sample_rates
                  ) = run_validation_with_ema(num_inference_steps)
 
             # Log validation results for this step
@@ -1359,6 +1372,7 @@ class DistillationPipeline(TrainingPipeline):
                     all_videos = step_videos  # Start with own results
                     all_captions = step_captions
                     all_ref_videos = step_ref_videos
+                    all_action_paths = step_action_paths
                     all_audios = step_audios
                     all_audio_sample_rates = step_audio_sample_rates
 
@@ -1368,12 +1382,14 @@ class DistillationPipeline(TrainingPipeline):
                         recv_videos = world_group.recv_object(src=src_rank)
                         recv_captions = world_group.recv_object(src=src_rank)
                         recv_ref_videos = world_group.recv_object(src=src_rank)
+                        recv_action_paths = world_group.recv_object(src=src_rank)
                         recv_audios = world_group.recv_object(src=src_rank)
                         recv_audio_sample_rates = world_group.recv_object(
                             src=src_rank)
                         all_videos.extend(recv_videos)
                         all_captions.extend(recv_captions)
                         all_ref_videos.extend(recv_ref_videos)
+                        all_action_paths.extend(recv_action_paths)
                         all_audios.extend(recv_audios)
                         all_audio_sample_rates.extend(recv_audio_sample_rates)
 
@@ -1436,13 +1452,98 @@ class DistillationPipeline(TrainingPipeline):
                                 {"validation_ref_videos": ref_artifacts},
                                 global_step)
                             self.validation_ref_videos_logged = True
+                    if evaluate_ptlflow:
+                        if not hasattr(self, "_ptlflow_validation"):
+                            self._ptlflow_validation = PTLFlowValidationHelper()
+                        self._ptlflow_validation.initialize(training_args)
+                        if not self._ptlflow_validation.ready:
+                            logger.warning(
+                                "PTLFlow evaluation is enabled but evaluator initialization failed. "
+                                "Skipping flow metrics for this validation run."
+                            )
+                        else:
+                            metric_sums = {
+                                key: 0.0
+                                for key in PTLFLOW_SCALAR_KEYS
+                            }
+                            metric_counts = {
+                                key: 0.0
+                                for key in PTLFLOW_SCALAR_KEYS
+                            }
+                            for filename, action_path in zip(
+                                    video_filenames,
+                                    all_action_paths,
+                                    strict=True):
+                                try:
+                                    sample_metrics = self._ptlflow_validation.evaluate_video(
+                                        video_path=filename,
+                                        action_path=action_path,
+                                        global_step=global_step,
+                                        num_inference_steps=num_inference_steps,
+                                        training_args=training_args,
+                                    )
+                                    for key in PTLFLOW_SCALAR_KEYS:
+                                        val = sample_metrics.get(key)
+                                        if not isinstance(
+                                                val,
+                                            (float, int, np.floating,
+                                             np.integer)):
+                                            continue
+                                        val_float = float(val)
+                                        if not np.isfinite(val_float):
+                                            continue
+                                        metric_sums[key] += val_float
+                                        metric_counts[key] += 1.0
+                                finally:
+                                    self._ptlflow_validation.release_cuda_memory()
+
+                            metric_logs: dict[str, float] = {}
+                            for metric_key in PTLFLOW_SCALAR_KEYS:
+                                count = metric_counts[metric_key]
+                                if count <= 0:
+                                    continue
+                                value = float(metric_sums[metric_key] / count)
+                                if not np.isfinite(value):
+                                    continue
+                                metric_logs[f"metrics/{metric_key}"] = value
+                            if metric_logs:
+                                self.tracker.log(metric_logs, global_step)
+                            latest_metric = metric_logs.get(
+                                "metrics/mf_angle_err_mean")
+                            if latest_metric is not None and np.isfinite(
+                                    latest_metric):
+                                self._last_ptlflow_metric = float(latest_metric)
+                                self._last_ptlflow_metric_step = int(global_step)
                 else:
                     # Other sp_group leaders send their results to global rank 0
                     world_group.send_object(step_videos, dst=0)
                     world_group.send_object(step_captions, dst=0)
                     world_group.send_object(step_ref_videos, dst=0)
+                    world_group.send_object(step_action_paths, dst=0)
                     world_group.send_object(step_audios, dst=0)
                     world_group.send_object(step_audio_sample_rates, dst=0)
+
+        if dist.is_available() and dist.is_initialized():
+            backend = dist.get_backend()
+            use_cuda = backend == "nccl" and torch.cuda.is_available()
+            metric_device = torch.device("cuda") if use_cuda else torch.device(
+                "cpu")
+            metric_state = torch.tensor(
+                [
+                    1.0 if self._last_ptlflow_metric_step == int(global_step)
+                    and self._last_ptlflow_metric is not None else 0.0,
+                    float(self._last_ptlflow_metric or 0.0),
+                ],
+                dtype=torch.float32,
+                device=metric_device,
+            )
+            dist.broadcast(metric_state, src=0)
+            if int(metric_state[0].item()) == 1:
+                self._last_ptlflow_metric = float(metric_state[1].item())
+                self._last_ptlflow_metric_step = int(global_step)
+            else:
+                self._last_ptlflow_metric = None
+                self._last_ptlflow_metric_step = None
 
         # Re-enable gradients for training - set both transformers back to train mode
         transformer.train()

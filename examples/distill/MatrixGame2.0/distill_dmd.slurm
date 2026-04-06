@@ -12,14 +12,18 @@
 #SBATCH --exclusive
 
 set -e -x
-
 # Environment Setup
-source ~/conda/miniconda/bin/activate
-conda activate /mnt/weka/home/hao.zhang/conda/miniconda/envs/alexfv
-export PYTHONPATH="/mnt/weka/home/hao.zhang/kaiqin/FastVideo_clean:$PYTHONPATH"
+if [ -f /opt/conda/etc/profile.d/conda.sh ]; then
+  source /opt/conda/etc/profile.d/conda.sh
+else
+  eval "$(/opt/conda/bin/conda shell.bash hook)"
+fi
+conda activate mhuo-fv
+
+export PYTHONPATH="/mnt/home/mhuo/FastVideo-MG:${PYTHONPATH:-}"
 
 # Basic Info
-export WANDB_API_KEY="7ff8b6e8356924f7a6dd51a0342dd1a422ea9352"
+export WANDB_API_KEY="d5b02b05e30d8cb34c7b31c6ae10416fc26dcb66"
 export WANDB_MODE="online"
 export NCCL_P2P_DISABLE=1
 export MASTER_PORT=29500
@@ -34,48 +38,48 @@ echo "NODE_RANK: $NODE_RANK"
 RUN_NAME=$(date +"%m%d_%H%M")
 echo "RUN_NAME: $RUN_NAME"
 
-# Model paths for Self-Forcing DMD distillation:
-# GENERATOR_MODEL_PATH="../mg_models/Solaris-Causal-30K-8K-18K"
-GENERATOR_MODEL_PATH="../mg_models/Solaris-SF-30K-8K-18K"
-REAL_SCORE_MODEL_PATH="../mg_models/Solaris-30K-8K-18K"  # Teacher mode
-FAKE_SCORE_MODEL_PATH="../mg_models/Solaris-30K-8K-18K"  # Critic model
+# Configs
+MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"
+DATA_DIR="/mnt/data/world_model/zelda_data/zeldam2-v2"
+VALIDATION_DATASET_FILE="/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/validation_zelda.json"
+RUN_NAME="XXXX"
+OUTPUT_DIR="/mnt/data/world_model/zelda_runs/checkpoints/$RUN_NAME"
+CKPT_PATH="/mnt/data/world_model/zelda_runs/mg_finetune_zelda_no_warmup/checkpoint-best-step-68500-df-init/transformer/diffusion_pytorch_model.safetensors"
 
-# GENERATOR_MODEL_PATH="../mg_models/Solaris-6Ksteps-Causal-0228"
-# REAL_SCORE_MODEL_PATH="../mg_models/Solaris-10Ksteps-0301"  # Teacher mode
-# FAKE_SCORE_MODEL_PATH="../mg_models/Solaris-10Ksteps-0301"  # Critic model
-
-DATA_DIR="../solaris/datasets/train/preprocessed_0228_81"
-VALIDATION_DATASET_FILE="examples/distill/MatrixGame2.0/validation.json"
+# Configs
+NUM_GPUS=4
+NUM_NODES=1
+NUM_TOTAL_GPUS=$((NUM_GPUS * NUM_NODES))
 
 # Training arguments
 training_args=(
-  --tracker_project_name "matrixgame_sf"
-  --output_dir "checkpoints/matrixgame_sf_${RUN_NAME}"
-  --wandb_run_name "${RUN_NAME}_test"
-  --max_train_steps 1000
+  --tracker_project_name "wangame_sf"
+  --output_dir $OUTPUT_DIR
+  --wandb_run_name $RUN_NAME
+  --max_train_steps 10000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 4
-  --num_latent_t 21
-  --num_height 352
-  --num_width 640
-  # --enable_gradient_checkpointing_type "full"
+  --num_latent_t 9
+  --num_height 480
+  --num_width 832
+  --enable_gradient_checkpointing_type "full"
   --log_visualization
   --simulate_generator_forward
-  --num_frames 81
+  --num_frames 33
   --num_frame_per_block 3  # Frame generation block size for self-forcing
   # --enable_gradient_masking
   # --gradient_mask_last_n_frames 21
-  --use-diagonal-denoising
+  # --use-diagonal-denoising
 )
 
 # Parallel arguments
 parallel_args=(
-  --num_gpus 8
+  --num_gpus $NUM_TOTAL_GPUS
   --sp_size 1
   --tp_size 1
   --hsdp_replicate_dim 1
-  --hsdp_shard_dim 8
+  --hsdp_shard_dim $NUM_TOTAL_GPUS
 )
 
 model_args=(

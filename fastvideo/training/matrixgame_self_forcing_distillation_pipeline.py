@@ -27,9 +27,11 @@ from fastvideo.pipelines.composed_pipeline_base import ComposedPipelineBase
 from fastvideo.pipelines.basic.matrixgame.matrixgame_causal_dmd_pipeline import (
     MatrixGameCausalDMDPipeline)
 from fastvideo.pipelines.pipeline_batch_info import ForwardBatch, TrainingBatch
+from fastvideo.training.ptlflow_validation import PTLFlowValidationHelper
 from fastvideo.training.self_forcing_distillation_pipeline import (
     SelfForcingDistillationPipeline)
-from fastvideo.training.training_utils import shift_timestep
+from fastvideo.training.training_utils import (save_best_distillation_checkpoint,
+                                               shift_timestep)
 from fastvideo.utils import is_vsa_available, shallow_asdict
 
 vsa_available = is_vsa_available()
@@ -54,6 +56,49 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
     def set_schemas(self):
         self.train_dataset_schema = pyarrow_schema_matrixgame
         # self.train_dataset_schema = pyarrow_schema_matrixgame_ode_trajectory
+
+    def _align_action_feature_dim(
+        self,
+        action: torch.Tensor | np.ndarray,
+        *,
+        name: str,
+        expected_dim: int,
+        context: str,
+    ) -> torch.Tensor | np.ndarray:
+        if expected_dim <= 0:
+            return action
+
+        actual_dim = int(action.shape[-1])
+        if actual_dim == expected_dim:
+            return action
+
+        if actual_dim > expected_dim:
+            extra = action[..., expected_dim:]
+            if torch.is_tensor(extra):
+                extra_is_zero = bool(torch.count_nonzero(extra).item() == 0)
+            else:
+                extra_is_zero = bool(np.count_nonzero(extra) == 0)
+
+            if extra_is_zero:
+                logger.warning(
+                    "%s feature dim mismatch in %s: got=%s expected=%s. "
+                    "Truncating trailing all-zero channels.",
+                    name,
+                    context,
+                    actual_dim,
+                    expected_dim,
+                )
+                return action[..., :expected_dim]
+
+            raise ValueError(
+                f"{name} feature dim mismatch in {context}: got={actual_dim}, "
+                f"expected={expected_dim}, and trailing channels are not all zero."
+            )
+
+        raise ValueError(
+            f"{name} feature dim mismatch in {context}: got={actual_dim}, "
+            f"expected={expected_dim}."
+        )
 
     @contextmanager
     def _temporary_teacher_transformer_override(
@@ -1006,6 +1051,9 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
             num_gpus=training_args.num_gpus,
             pin_cpu_memory=training_args.pin_cpu_memory,
             dit_cpu_offload=True)
+        self._ptlflow_validation = PTLFlowValidationHelper()
+        self._last_ptlflow_metric: float | None = None
+        self._last_ptlflow_metric_step: int | None = None
 
     def _get_next_batch(self, training_batch: TrainingBatch) -> TrainingBatch:
         batch = next(self.train_loader_iter, None)  # type: ignore
@@ -1056,7 +1104,12 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         if keyboard_cond is not None and keyboard_cond.numel() > 0:
             keyboard_cond_full = keyboard_cond.to(get_local_torch_device(),
                                                   dtype=torch.bfloat16)
-            training_batch.keyboard_cond = keyboard_cond_full  # For Teacher/Critic (dim=6)
+            training_batch.keyboard_cond = self._align_action_feature_dim(
+                keyboard_cond_full,
+                name="keyboard_cond",
+                expected_dim=self.keyboard_dim_in,
+                context="training batch",
+            )
         else:
             training_batch.keyboard_cond = None
         if mouse_cond is not None and mouse_cond.numel() > 0:
@@ -1305,6 +1358,12 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         if "keyboard_cond" in validation_batch and validation_batch[
                 "keyboard_cond"] is not None:
             keyboard_cond = validation_batch["keyboard_cond"]
+            keyboard_cond = self._align_action_feature_dim(
+                keyboard_cond,
+                name="keyboard_cond",
+                expected_dim=self.keyboard_dim_in,
+                context="validation batch",
+            )
             keyboard_cond = torch.tensor(keyboard_cond, dtype=torch.bfloat16)
             keyboard_cond = keyboard_cond.unsqueeze(0)
             batch.keyboard_cond = keyboard_cond
@@ -1321,52 +1380,53 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
     def _post_process_validation_frames(
             self, frames: list[np.ndarray],
             batch: ForwardBatch) -> list[np.ndarray]:
-        """Apply action overlay to validation frames for WanGame.
-        
-        Draws keyboard (WASD) and mouse (pitch/yaw) indicators on the video frames.
-        """
-        # Check if action data is available
-        keyboard_cond = getattr(batch, 'keyboard_cond', None)
-        mouse_cond = getattr(batch, 'mouse_cond', None)
+        from fastvideo.models.dits.matrixgame.utils import (
+            overlay_validation_actions_on_frames,
+        )
 
-        if keyboard_cond is None and mouse_cond is None:
-            return frames
+        return overlay_validation_actions_on_frames(
+            frames,
+            keyboard_cond=getattr(batch, "keyboard_cond", None),
+            mouse_cond=getattr(batch, "mouse_cond", None),
+        )
 
-        # Import overlay functions
-        from fastvideo.models.dits.matrixgame.utils import (draw_keys_on_frame,
-                                                            draw_mouse_on_frame)
-
-        # Convert tensors to numpy if needed (bfloat16 -> float32 -> numpy)
-        if keyboard_cond is not None:
-            keyboard_cond = keyboard_cond.squeeze(
-                0).cpu().float().numpy()  # (T, 6)
-        if mouse_cond is not None:
-            mouse_cond = mouse_cond.squeeze(0).cpu().float().numpy()  # (T, 2)
-
-        # MatrixGame convention: keyboard [W, S, A, D, left, right], mouse [Pitch, Yaw]
-        key_names = ["W", "S", "A", "D", "left", "right"]
-
-        processed_frames = []
-        for frame_idx, frame in enumerate(frames):
-            frame = np.ascontiguousarray(frame.copy())
-
-            # Draw keyboard overlay
-            if keyboard_cond is not None and frame_idx < len(keyboard_cond):
-                keys = {
-                    key_names[i]: bool(keyboard_cond[frame_idx, i])
-                    for i in range(min(len(key_names), keyboard_cond.shape[1]))
-                }
-                draw_keys_on_frame(frame, keys)
-
-            # Draw mouse overlay
-            if mouse_cond is not None and frame_idx < len(mouse_cond):
-                pitch = float(mouse_cond[frame_idx, 0])
-                yaw = float(mouse_cond[frame_idx, 1])
-                draw_mouse_on_frame(frame, yaw=yaw, pitch=pitch)
-
-            processed_frames.append(frame)
-
-        return processed_frames
+    def _after_validation(self, step: int) -> None:
+        if self._last_ptlflow_metric_step != int(step):
+            return
+        save_best_distillation_checkpoint(
+            self.transformer,
+            self.fake_score_transformer,
+            self.global_rank,
+            self.training_args.output_dir,
+            step=int(step),
+            metric_value=self._last_ptlflow_metric,
+            metric_name="mf_angle_err_mean",
+            generator_optimizer=self.optimizer,
+            fake_score_optimizer=self.fake_score_optimizer,
+            dataloader=self.train_dataloader,
+            generator_scheduler=self.lr_scheduler,
+            fake_score_scheduler=self.fake_score_lr_scheduler,
+            noise_generator=self.noise_random_generator,
+            start_step=int(
+                getattr(self.training_args, "best_checkpoint_start_step", 0)
+                or 0),
+            top_k=int(
+                getattr(self.training_args, "best_checkpoint_top_k", 1) or 1),
+            tracker=self.tracker if self.global_rank == 0 else None,
+            generator_ema=self.generator_ema,
+            generator_transformer_2=getattr(self, "transformer_2", None),
+            real_score_transformer_2=getattr(
+                self, "real_score_transformer_2", None),
+            fake_score_transformer_2=getattr(
+                self, "fake_score_transformer_2", None),
+            generator_optimizer_2=getattr(self, "optimizer_2", None),
+            fake_score_optimizer_2=getattr(
+                self, "fake_score_optimizer_2", None),
+            generator_scheduler_2=getattr(self, "lr_scheduler_2", None),
+            fake_score_scheduler_2=getattr(
+                self, "fake_score_lr_scheduler_2", None),
+            generator_ema_2=getattr(self, "generator_ema_2", None),
+        )
 
 
 def main(args) -> None:

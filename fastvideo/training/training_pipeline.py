@@ -905,6 +905,16 @@ class TrainingPipeline(LoRAPipeline, ABC):
 
             step_audio: list[np.ndarray | None] = []
             step_sample_rates: list[int | None] = []
+            local_video_filenames: list[str] = []
+            local_metric_sums = {
+                key: 0.0
+                for key in PTLFLOW_SCALAR_KEYS
+            }
+            local_metric_counts = {
+                key: 0.0
+                for key in PTLFLOW_SCALAR_KEYS
+            }
+            local_eval_errors: list[str] = []
 
             for validation_batch in validation_dataloader:
                 batch = self._prepare_validation_batch(sampling_param,
@@ -954,61 +964,93 @@ class TrainingPipeline(LoRAPipeline, ABC):
                 frames = self._post_process_validation_frames(frames, batch)
                 step_videos.append(frames)
 
-            # Only sp_group leaders (rank_in_sp_group == 0) need to send their
-            # results to global rank 0
-            if self.rank_in_sp_group == 0 and self.global_rank == 0:
-                # Global rank 0 collects results from all sp_group leaders
-                all_videos = step_videos  # Start with own results
-                all_captions = step_captions
-                all_ref_videos = step_ref_videos
-                all_action_paths = step_action_paths
-                all_audios = step_audio
-                all_sample_rates = step_sample_rates
-
-                # Receive from other sp_group leaders
-                for sp_group_idx in range(1, num_sp_groups):
-                    src_rank = sp_group_idx * self.sp_world_size  # Global rank of other sp_group leaders
-                    recv_videos = world_group.recv_object(src=src_rank)
-                    recv_captions = world_group.recv_object(src=src_rank)
-                    recv_ref_videos = world_group.recv_object(src=src_rank)
-                    recv_action_paths = world_group.recv_object(src=src_rank)
-                    recv_audios = world_group.recv_object(src=src_rank)
-                    recv_sample_rates = world_group.recv_object(src=src_rank)
-
-                    all_videos.extend(recv_videos)
-                    all_captions.extend(recv_captions)
-                    all_ref_videos.extend(recv_ref_videos)
-                    all_action_paths.extend(recv_action_paths)
-                    all_audios.extend(recv_audios)
-                    all_sample_rates.extend(recv_sample_rates)
-
-                video_filenames = []
-                for i, (video, caption, audio, sample_rate) in enumerate(
-                        zip(all_videos,
-                            all_captions,
-                            all_audios,
-                            all_sample_rates,
+            flow_eval_enabled = bool(evaluate_ptlflow)
+            if self.rank_in_sp_group == 0:
+                os.makedirs(training_args.output_dir, exist_ok=True)
+                for i, (video, audio, sample_rate) in enumerate(
+                        zip(step_videos,
+                            step_audio,
+                            step_sample_rates,
                             strict=True)):
-                    os.makedirs(training_args.output_dir, exist_ok=True)
                     filename = os.path.join(
                         training_args.output_dir,
-                        f"validation_step_{global_step}_inference_steps_{num_inference_steps}_video_{i}.mp4"
-                    )
+                        "validation_step_"
+                        f"{global_step}_inference_steps_"
+                        f"{num_inference_steps}_rank_"
+                        f"{self.global_rank}_video_{i}.mp4")
                     imageio.mimsave(filename, video, fps=sampling_param.fps)
-                    # Mux audio if available
                     if (audio is not None and sample_rate is not None
-                            and not self._mux_audio(
-                                filename,
-                                audio,
-                                sample_rate,
-                            )):
+                            and not self._mux_audio(filename, audio,
+                                                    sample_rate)):
                         logger.warning(
                             "Audio mux failed for validation video %s; saved video without audio.",
                             filename)
-                    video_filenames.append(filename)
+                    local_video_filenames.append(filename)
+
+                if flow_eval_enabled:
+                    if not hasattr(self, "_ptlflow_validation"):
+                        self._ptlflow_validation = PTLFlowValidationHelper()
+                    self._ptlflow_validation.initialize(training_args)
+                    if not self._ptlflow_validation.ready:
+                        logger.warning(
+                            "PTLFlow evaluation is enabled but evaluator initialization failed. "
+                            "Skipping flow metrics for this validation run."
+                        )
+                        flow_eval_enabled = False
+
+                if flow_eval_enabled:
+                    for filename, action_path in zip(local_video_filenames,
+                                                     step_action_paths,
+                                                     strict=True):
+                        try:
+                            sample_metrics = self._ptlflow_validation.evaluate_video(
+                                video_path=filename,
+                                action_path=action_path,
+                                global_step=global_step,
+                                num_inference_steps=num_inference_steps,
+                                training_args=training_args,
+                            )
+                            for key in PTLFLOW_SCALAR_KEYS:
+                                val = sample_metrics.get(key)
+                                if not isinstance(
+                                        val,
+                                    (float, int, np.floating, np.integer),
+                                ):
+                                    continue
+                                val_float = float(val)
+                                if not np.isfinite(val_float):
+                                    continue
+                                local_metric_sums[key] += val_float
+                                local_metric_counts[key] += 1.0
+                        except Exception as e:
+                            err = (
+                                "Validation flow evaluation failed on rank "
+                                f"{self.global_rank} for {filename}: {e}")
+                            logger.exception(err)
+                            local_eval_errors.append(err)
+                        finally:
+                            # PTLFlow allocates large CUDA buffers. Free caches
+                            # aggressively before returning to training.
+                            self._ptlflow_validation.release_cuda_memory()
+
+            if self.rank_in_sp_group == 0 and self.global_rank == 0:
+                all_video_filenames = list(local_video_filenames)
+                all_captions = list(step_captions)
+                all_ref_videos = list(step_ref_videos)
+
+                for sp_group_idx in range(1, num_sp_groups):
+                    src_rank = sp_group_idx * self.sp_world_size
+                    recv_video_filenames = world_group.recv_object(
+                        src=src_rank)
+                    recv_captions = world_group.recv_object(src=src_rank)
+                    recv_ref_videos = world_group.recv_object(src=src_rank)
+
+                    all_video_filenames.extend(recv_video_filenames)
+                    all_captions.extend(recv_captions)
+                    all_ref_videos.extend(recv_ref_videos)
 
                 artifacts = []
-                for filename, caption in zip(video_filenames,
+                for filename, caption in zip(all_video_filenames,
                                              all_captions,
                                              strict=True):
                     video_artifact = self.tracker.video(filename,
@@ -1042,76 +1084,82 @@ class TrainingPipeline(LoRAPipeline, ABC):
                             {"validation_ref_videos": ref_artifacts},
                             global_step)
                         self.validation_ref_videos_logged = True
-                if evaluate_ptlflow:
-                    if not hasattr(self, "_ptlflow_validation"):
-                        self._ptlflow_validation = PTLFlowValidationHelper()
-                    self._ptlflow_validation.initialize(training_args)
-                    if not self._ptlflow_validation.ready:
-                        logger.warning(
-                            "PTLFlow evaluation is enabled but evaluator initialization failed. "
-                            "Skipping flow metrics for this validation run."
-                        )
-                    else:
-                        metric_sums = {
-                            key: 0.0
-                            for key in PTLFLOW_SCALAR_KEYS
-                        }
-                        metric_counts = {
-                            key: 0.0
-                            for key in PTLFLOW_SCALAR_KEYS
-                        }
-                        for filename, action_path in zip(
-                                video_filenames,
-                                all_action_paths,
-                                strict=True):
-                            try:
-                                sample_metrics = self._ptlflow_validation.evaluate_video(
-                                    video_path=filename,
-                                    action_path=action_path,
-                                    global_step=global_step,
-                                    num_inference_steps=num_inference_steps,
-                                    training_args=training_args,
-                                )
-                                for key in PTLFLOW_SCALAR_KEYS:
-                                    val = sample_metrics.get(key)
-                                    if not isinstance(
-                                            val,
-                                        (float, int, np.floating, np.integer),
-                                    ):
-                                        continue
-                                    val_float = float(val)
-                                    if not np.isfinite(val_float):
-                                        continue
-                                    metric_sums[key] += val_float
-                                    metric_counts[key] += 1.0
-                            finally:
-                                self._ptlflow_validation.release_cuda_memory()
-
-                        metric_logs: dict[str, float] = {}
-                        for metric_key in PTLFLOW_SCALAR_KEYS:
-                            count = metric_counts[metric_key]
-                            if count <= 0:
-                                continue
-                            value = float(metric_sums[metric_key] / count)
-                            if not np.isfinite(value):
-                                continue
-                            metric_logs[f"metrics/{metric_key}"] = value
-                        if metric_logs:
-                            self.tracker.log(metric_logs, global_step)
-                        latest_metric = metric_logs.get(
-                            "metrics/mf_angle_err_mean")
-                        if latest_metric is not None and np.isfinite(
-                                latest_metric):
-                            self._last_ptlflow_metric = float(latest_metric)
-                            self._last_ptlflow_metric_step = int(global_step)
             elif self.rank_in_sp_group == 0:
-                # Other sp_group leaders send their results to global rank 0
-                world_group.send_object(step_videos, dst=0)
+                world_group.send_object(local_video_filenames, dst=0)
                 world_group.send_object(step_captions, dst=0)
                 world_group.send_object(step_ref_videos, dst=0)
-                world_group.send_object(step_action_paths, dst=0)
-                world_group.send_object(step_audio, dst=0)
-                world_group.send_object(step_sample_rates, dst=0)
+
+            use_cuda_tensor = (dist.is_available() and dist.is_initialized()
+                               and dist.get_backend() == "nccl"
+                               and torch.cuda.is_available())
+            tensor_device = (torch.device("cuda")
+                             if use_cuda_tensor else torch.device("cpu"))
+
+            if dist.is_available() and dist.is_initialized():
+                eval_failed = torch.tensor(
+                    [1 if local_eval_errors else 0],
+                    device=tensor_device,
+                    dtype=torch.int32,
+                )
+                dist.all_reduce(eval_failed, op=dist.ReduceOp.MAX)
+                if int(eval_failed.item()) > 0:
+                    if local_eval_errors:
+                        raise RuntimeError(
+                            "Validation flow evaluation failed:\n"
+                            + "\n".join(local_eval_errors))
+                    raise RuntimeError(
+                        "Validation flow evaluation failed on at least one rank. Check per-rank logs."
+                    )
+            elif local_eval_errors:
+                raise RuntimeError(
+                    "Validation flow evaluation failed:\n"
+                    + "\n".join(local_eval_errors))
+
+            if not evaluate_ptlflow:
+                continue
+
+            metric_sum_tensor = torch.zeros(
+                len(PTLFLOW_SCALAR_KEYS),
+                device=tensor_device,
+                dtype=torch.float64,
+            )
+            metric_count_tensor = torch.zeros(
+                len(PTLFLOW_SCALAR_KEYS),
+                device=tensor_device,
+                dtype=torch.float64,
+            )
+            if self.rank_in_sp_group == 0 and flow_eval_enabled:
+                metric_sum_tensor = torch.tensor(
+                    [local_metric_sums[key] for key in PTLFLOW_SCALAR_KEYS],
+                    device=tensor_device,
+                    dtype=torch.float64,
+                )
+                metric_count_tensor = torch.tensor(
+                    [local_metric_counts[key] for key in PTLFLOW_SCALAR_KEYS],
+                    device=tensor_device,
+                    dtype=torch.float64,
+                )
+
+            if dist.is_available() and dist.is_initialized():
+                dist.all_reduce(metric_sum_tensor, op=dist.ReduceOp.SUM)
+                dist.all_reduce(metric_count_tensor, op=dist.ReduceOp.SUM)
+
+            if self.global_rank == 0:
+                metric_logs: dict[str, float] = {}
+                for i, metric_key in enumerate(PTLFLOW_SCALAR_KEYS):
+                    count = float(metric_count_tensor[i].item())
+                    if count <= 0:
+                        continue
+                    value = float(metric_sum_tensor[i].item() / count)
+                    if not np.isfinite(value):
+                        continue
+                    metric_logs[f"metrics/{metric_key}"] = value
+                if metric_logs:
+                    self.tracker.log(metric_logs, global_step)
+                latest_metric = metric_logs.get("metrics/mf_angle_err_mean")
+                if latest_metric is not None and np.isfinite(latest_metric):
+                    self._last_ptlflow_metric = float(latest_metric)
+                    self._last_ptlflow_metric_step = int(global_step)
 
         if dist.is_available() and dist.is_initialized():
             backend = dist.get_backend()

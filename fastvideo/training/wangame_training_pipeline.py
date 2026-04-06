@@ -503,9 +503,12 @@ class WanGameTrainingPipeline(TrainingPipeline):
         del caption
         self._init_flow_eval_module()
         if not getattr(self, "_flow_eval_ready", False):
-            raise RuntimeError(
-                "ptlflow evaluator is not initialized; cannot compute flow metrics."
-            )
+            if not getattr(self, "_flow_eval_skip_warned", False):
+                logger.warning(
+                    "Skipping validation flow metrics because the ptlflow evaluator is unavailable on this machine."
+                )
+                self._flow_eval_skip_warned = True
+            return {}
 
         if not isinstance(action_path, str) or not os.path.isfile(action_path):
             raise FileNotFoundError(

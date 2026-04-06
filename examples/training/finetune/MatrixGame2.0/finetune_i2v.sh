@@ -9,15 +9,14 @@ export TOKENIZERS_PARALLELISM=false
 
 # Configs
 # MODEL_PATH="../mg_models/Solaris-6K"
-MODEL_PATH="../mg_models/Solaris-30K"
-# MODEL_PATH="../mg_models/skyreel"
+MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"
 # MODEL_PATH="../mg_models/Matrix-Game-2.0-Base-Diffusers"
-DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/vpt/vpt/train_81f/preprocessed_0306"
+DATA_DIR="/mnt/data/world_model/zelda_data/zeldam2-v2"
 # DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f/preprocessed_0308"
 # DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed"
 # VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/kaiqin/FastVideo_clean/examples/training/finetune/MatrixGame2.0/validation_8_vpt_mix.json"
-# VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/kaiqin/FastVideo_clean/examples/training/finetune/MatrixGame2.0/validation.json"
-VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/validation_random.json"
+VALIDATION_DATASET_FILE="/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/validation_zelda.json"
+
 NUM_GPUS=4
 
 # Training arguments

@@ -9,6 +9,10 @@
 #SBATCH --output=finetune_i2v_output/i2v_%j.out
 #SBATCH --error=finetune_i2v_output/i2v_%j.err
 #SBATCH --exclusive
+
+# 563 without warmup
+# 564 with warmup
+
 set -e -x
 
 # Environment Setup
@@ -56,21 +60,22 @@ NUM_TOTAL_GPUS=$((NUM_GPUS * NUM_NODES))
 # Training arguments
 training_args=(
   --tracker_project_name "wangame_1.3b_zelda"
-  --output_dir "/mnt/data/world_model/zelda_runs/mg_finetune_zelda_with_warmup"
+  --output_dir "/mnt/data/world_model/zelda_runs/mg_finetune_zelda_with_10k_warmup"
   # --wandb_run_name "${RUN_NAME}_bs64_continue_resume_from_8K"
-  --wandb_run_name "mg_zelda_with_warmup"
+  --wandb_run_name "mg_zelda_with_10k_warmup"
   --override_transformer_cls_name "MatrixGameWanModel"
+  --init_weights_from_safetensors "/mnt/data/world_model/zelda_runs/mg_finetune_zelda_warmup/checkpoint-10000/transformer/diffusion_pytorch_model.safetensors"
   --max_train_steps 80000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --action_warmup_steps 10000
+  --action_warmup_steps 0
   --num_latent_t 9
   --num_height 480
   --num_width 832
   --num_frames 33
   # --enable_gradient_checkpointing_type "full"
-  --reinit-action-module True
+  --reinit-action-module False
   # --override-keyboard-dim 23
 )
 

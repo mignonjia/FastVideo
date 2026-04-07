@@ -1,0 +1,92 @@
+{
+    "data": [
+        {
+            "caption": "00 W",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/train_81f_test/batch2_split_9_000041_Alpha_instance_000_clip000810.png",
+            "ref_video": "/mnt/home/mhuo/FastVideo-MG/train_81f_test/batch2_split_9_000041_Alpha_instance_000_clip000810.mp4",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/examples/distill/MatrixGame2.0/w_201.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 201
+        },
+        {
+            "caption": "01 S",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/train_81f_test/batch2_split_4_000076_Bravo_instance_001_clip000000.png",
+            "ref_video": "/mnt/home/mhuo/FastVideo-MG/train_81f_test/batch2_split_4_000076_Bravo_instance_001_clip000000.mp4",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/examples/distill/MatrixGame2.0/s_201.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 201
+        },
+        {
+            "caption": "02 A",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/train_81f_test/75_batch2_split_2_000041_Bravo_instance_003_clip002673.png",
+            "ref_video": "/mnt/home/mhuo/FastVideo-MG/train_81f_test/75_batch2_split_2_000041_Bravo_instance_003_clip002673.mp4",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/examples/distill/MatrixGame2.0/a_201.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 201
+        },
+        {
+            "caption": "03 D",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/train_81f_test/batch2_split_5_000053_Alpha_instance_003_clip000243.png",
+            "ref_video": "/mnt/home/mhuo/FastVideo-MG/train_81f_test/batch2_split_5_000053_Alpha_instance_003_clip000243.mp4",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/examples/distill/MatrixGame2.0/d_201.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 201
+        },
+        {
+            "caption": "00 W then Still",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/train_81f_test/batch2_split_9_000041_Alpha_instance_000_clip000810.png",
+            "ref_video": "/mnt/home/mhuo/FastVideo-MG/train_81f_test/batch2_split_9_000041_Alpha_instance_000_clip000810.mp4",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/examples/distill/MatrixGame2.0/w_141_still_60.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 201
+        },
+        {
+            "caption": "01 S then Still",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/train_81f_test/batch2_split_4_000076_Bravo_instance_001_clip000000.png",
+            "ref_video": "/mnt/home/mhuo/FastVideo-MG/train_81f_test/batch2_split_4_000076_Bravo_instance_001_clip000000.mp4",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/examples/distill/MatrixGame2.0/s_141_still_60.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 201
+        },
+        {
+            "caption": "02 A then Still",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/train_81f_test/75_batch2_split_2_000041_Bravo_instance_003_clip002673.png",
+            "ref_video": "/mnt/home/mhuo/FastVideo-MG/train_81f_test/75_batch2_split_2_000041_Bravo_instance_003_clip002673.mp4",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/examples/distill/MatrixGame2.0/a_141_still_60.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 201
+        },
+        {
+            "caption": "03 D then Still",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/train_81f_test/batch2_split_5_000053_Alpha_instance_003_clip000243.png",
+            "ref_video": "/mnt/home/mhuo/FastVideo-MG/train_81f_test/batch2_split_5_000053_Alpha_instance_003_clip000243.mp4",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/examples/distill/MatrixGame2.0/d_141_still_60.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 352,
+            "width": 640,
+            "num_frames": 201
+        }
+    ]
+}

@@ -659,6 +659,28 @@ class CausalMatrixGameWanModel(BaseDiT):
         self.__post_init__()
 
     @staticmethod
+    def _snapshot_kv_cache_length(
+        kv_cache: KVCache | None,
+    ) -> KVCache | None:
+        if kv_cache is None:
+            return None
+        return KVCache(
+            k=kv_cache.k,
+            v=kv_cache.v,
+            length=kv_cache.length.detach().clone(),
+        )
+
+    def _snapshot_kv_cache_lengths(
+        self,
+        kv_caches: list[KVCache] | list[KVCache | None] | None,
+    ) -> list[KVCache | None] | None:
+        if kv_caches is None:
+            return None
+        return [
+            self._snapshot_kv_cache_length(kv_cache) for kv_cache in kv_caches
+        ]
+
+    @staticmethod
     def _prepare_blockwise_causal_attn_mask(
         device: torch.device | str,
         num_frames: int = 9,
@@ -1063,61 +1085,66 @@ class CausalMatrixGameWanModel(BaseDiT):
         if crossattn_cache is None:
             crossattn_cache = [None] * len(self.blocks)
 
+        checkpoint_safe_inference = torch.is_grad_enabled() and (
+            not update_kv_cache
+        )
+        block_kv_cache = kv_cache
+        block_kv_cache_mouse = kv_cache_mouse
+        block_kv_cache_keyboard = kv_cache_keyboard
+        block_crossattn_cache = crossattn_cache
+        if checkpoint_safe_inference:
+            block_kv_cache = self._snapshot_kv_cache_lengths(kv_cache)
+            block_kv_cache_mouse = self._snapshot_kv_cache_lengths(
+                kv_cache_mouse
+            )
+            block_kv_cache_keyboard = self._snapshot_kv_cache_lengths(
+                kv_cache_keyboard
+            )
+            # Cross-attn cache is only a compute reuse optimization here.
+            # Disable it on grad-enabled streaming passes to avoid mutating
+            # shared cache state under activation checkpoint recomputation.
+            block_crossattn_cache = None
+
         for block_index, block in enumerate(self.blocks):
+            block_kwargs = {
+                "kv_cache": block_kv_cache[block_index],
+                "kv_cache_mouse": block_kv_cache_mouse[block_index]
+                if block_kv_cache_mouse
+                else None,
+                "kv_cache_keyboard": block_kv_cache_keyboard[block_index]
+                if block_kv_cache_keyboard
+                else None,
+                "crossattn_cache": block_crossattn_cache[block_index]
+                if block_crossattn_cache
+                else None,
+                "block_mask": inference_block_mask,
+                "grid_sizes": grid_sizes,
+                "mouse_cond": mouse_cond,
+                "keyboard_cond": keyboard_cond,
+                "block_mask_mouse": inference_block_mask_mouse,
+                "block_mask_keyboard": inference_block_mask_keyboard,
+                "current_start": current_start,
+                "cache_start": cache_start,
+                "num_frame_per_block": effective_num_frame_per_block,
+                "update_kv_cache": update_kv_cache,
+                "use_rope_keyboard": self.use_rope_keyboard,
+            }
             if torch.is_grad_enabled() and self.gradient_checkpointing:
-                kwargs.update(
-                    {
-                        "kv_cache": kv_cache[block_index],
-                        "kv_cache_mouse": kv_cache_mouse[block_index]
-                        if kv_cache_mouse
-                        else None,
-                        "kv_cache_keyboard": kv_cache_keyboard[block_index]
-                        if kv_cache_keyboard
-                        else None,
-                        "crossattn_cache": crossattn_cache[block_index]
-                        if crossattn_cache
-                        else None,
-                        "current_start": current_start,
-                        "cache_start": cache_start,
-                        "num_frame_per_block": effective_num_frame_per_block,
-                        "update_kv_cache": update_kv_cache,
-                    }
-                )
                 hidden_states = self._gradient_checkpointing_func(
-                    block, hidden_states, **kwargs
+                    block,
+                    hidden_states,
+                    encoder_hidden_states,
+                    timestep_proj,
+                    freqs_cis,
+                    **block_kwargs,
                 )
             else:
-                kwargs.update(
-                    {
-                        "kv_cache": kv_cache[block_index],
-                        "kv_cache_mouse": kv_cache_mouse[block_index]
-                        if kv_cache_mouse
-                        else None,
-                        "kv_cache_keyboard": kv_cache_keyboard[block_index]
-                        if kv_cache_keyboard
-                        else None,
-                        "crossattn_cache": crossattn_cache[block_index]
-                        if crossattn_cache
-                        else None,
-                        "current_start": current_start,
-                        "cache_start": cache_start,
-                        "update_kv_cache": update_kv_cache,
-                    }
-                )
                 hidden_states = block(
                     hidden_states,
                     encoder_hidden_states,
                     timestep_proj,
                     freqs_cis,
-                    block_mask=inference_block_mask,
-                    grid_sizes=grid_sizes,
-                    mouse_cond=mouse_cond,
-                    keyboard_cond=keyboard_cond,
-                    block_mask_mouse=inference_block_mask_mouse,
-                    block_mask_keyboard=inference_block_mask_keyboard,
-                    num_frame_per_block=effective_num_frame_per_block,
-                    use_rope_keyboard=self.use_rope_keyboard,
-                    **kwargs,
+                    **block_kwargs,
                 )
 
         temb = temb.unflatten(
@@ -1322,6 +1349,18 @@ class CausalMatrixGameWanModel(BaseDiT):
             "crossattn_cache", [None] * len(self.blocks)
         )
 
+        checkpoint_kv_cache = kv_cache
+        checkpoint_kv_cache_mouse = kv_cache_mouse
+        checkpoint_kv_cache_keyboard = kv_cache_keyboard
+        if torch.is_grad_enabled() and self.gradient_checkpointing:
+            checkpoint_kv_cache = self._snapshot_kv_cache_lengths(kv_cache)
+            checkpoint_kv_cache_mouse = self._snapshot_kv_cache_lengths(
+                kv_cache_mouse
+            )
+            checkpoint_kv_cache_keyboard = self._snapshot_kv_cache_lengths(
+                kv_cache_keyboard
+            )
+
         for i, block in enumerate(self.blocks):
             block_crossattn_cache = None
             if crossattn_cache is not None:
@@ -1336,9 +1375,9 @@ class CausalMatrixGameWanModel(BaseDiT):
                     encoder_hidden_states,
                     timestep_proj,
                     freqs_cis,
-                    kv_cache=kv_cache[i],
-                    kv_cache_mouse=kv_cache_mouse[i],
-                    kv_cache_keyboard=kv_cache_keyboard[i],
+                    kv_cache=checkpoint_kv_cache[i],
+                    kv_cache_mouse=checkpoint_kv_cache_mouse[i],
+                    kv_cache_keyboard=checkpoint_kv_cache_keyboard[i],
                     crossattn_cache=block_crossattn_cache,
                     block_mask=self.block_mask,
                     grid_sizes=grid_sizes,

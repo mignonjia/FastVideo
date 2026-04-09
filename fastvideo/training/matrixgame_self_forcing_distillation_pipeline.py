@@ -589,15 +589,32 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
 
         image_embeds = self._get_image_embeds(training_batch)
         assert training_batch.image_latents is not None
+        num_latent_frames = noise_input.shape[1]
+        image_latents = training_batch.image_latents[
+            :, :, :num_latent_frames, :, :
+        ]
+        action_frame_end = (
+            (num_latent_frames - 1) * self.vae_time_compression_ratio + 1
+        )
+        keyboard_cond = (
+            training_batch.keyboard_cond[:, :action_frame_end, :]
+            if training_batch.keyboard_cond is not None
+            else None
+        )
+        mouse_cond = (
+            training_batch.mouse_cond[:, :action_frame_end, :]
+            if training_batch.mouse_cond is not None
+            else None
+        )
         return {
             "hidden_states": self._concat_matrixgame_hidden_states(
-                noise_input, training_batch.image_latents
+                noise_input, image_latents
             ),
             "encoder_hidden_states": None,
             "timestep": timestep,
             "encoder_hidden_states_image": image_embeds,
-            "keyboard_cond": training_batch.keyboard_cond,
-            "mouse_cond": training_batch.mouse_cond,
+            "keyboard_cond": keyboard_cond,
+            "mouse_cond": mouse_cond,
         }
 
     def _initialize_simulation_caches(
@@ -1337,13 +1354,19 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
         assert self.seed is not None
         sampling_param.seed = self.seed
 
+        temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
+        validation_num_frames = int(
+            getattr(training_args, "validation_num_frames", 0) or 0
+        )
+        if validation_num_frames > 0:
+            num_frames = validation_num_frames
+        else:
+            num_frames = (training_args.num_latent_t -
+                          1) * temporal_compression_factor + 1
+        sampling_param.num_frames = num_frames
         latents_size = [(sampling_param.num_frames - 1) // 4 + 1,
                         sampling_param.height // 8, sampling_param.width // 8]
         n_tokens = latents_size[0] * latents_size[1] * latents_size[2]
-        temporal_compression_factor = training_args.pipeline_config.vae_config.arch_config.temporal_compression_ratio
-        num_frames = (training_args.num_latent_t -
-                      1) * temporal_compression_factor + 1
-        sampling_param.num_frames = num_frames
         batch = ForwardBatch(
             **shallow_asdict(sampling_param),
             latents=None,
@@ -1357,7 +1380,9 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
 
         if "keyboard_cond" in validation_batch and validation_batch[
                 "keyboard_cond"] is not None:
-            keyboard_cond = validation_batch["keyboard_cond"]
+            keyboard_cond = validation_batch["keyboard_cond"][
+                :sampling_param.num_frames
+            ]
             keyboard_cond = self._align_action_feature_dim(
                 keyboard_cond,
                 name="keyboard_cond",
@@ -1370,7 +1395,9 @@ class MatrixGameSelfForcingDistillationPipeline(SelfForcingDistillationPipeline
 
         if "mouse_cond" in validation_batch and validation_batch[
                 "mouse_cond"] is not None:
-            mouse_cond = validation_batch["mouse_cond"]
+            mouse_cond = validation_batch["mouse_cond"][
+                :sampling_param.num_frames
+            ]
             mouse_cond = torch.tensor(mouse_cond, dtype=torch.bfloat16)
             mouse_cond = mouse_cond.unsqueeze(0)
             batch.mouse_cond = mouse_cond

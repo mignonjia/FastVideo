@@ -38,7 +38,7 @@ RUN_NAME=$(date +"%m%d_%H%M")
 echo "RUN_NAME: $RUN_NAME"
 
 # Model paths for Self-Forcing DMD distillation:
-GENERATOR_MODEL_PATH="H1yori233/mg_solaris"
+GENERATOR_MODEL_PATH="H1yori233/skyreels_solaris"
 REAL_SCORE_MODEL_PATH="H1yori233/mg_bidirectional_Solaris"  # Teacher mode
 FAKE_SCORE_MODEL_PATH="H1yori233/mg_bidirectional_Solaris"  # Critic model
 

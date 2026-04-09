@@ -44,7 +44,7 @@ echo "RUN_NAME: $RUN_NAME"
 # Configs
 # MODEL_PATH="../mg_models/Solaris-6K"
 # MODEL_PATH="../mg_models/Solaris-30K"
-MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"
+MODEL_PATH="/mnt/data/world_model/mg_zelda_df"
 # MODEL_PATH="../mg_models/Matrix-Game-2.0-Base-Diffusers"
 DATA_DIR="/mnt/data/world_model/zelda_data/zeldam2-v2"
 # DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f/preprocessed_0308"
@@ -64,8 +64,8 @@ training_args=(
   # --wandb_run_name "${RUN_NAME}_bs64_continue_resume_from_8K"
   --wandb_run_name "mg_zelda_with_10k_warmup"
   --override_transformer_cls_name "MatrixGameWanModel"
-  --init_weights_from_safetensors "/mnt/data/world_model/zelda_runs/mg_finetune_zelda_warmup/checkpoint-10000/transformer/diffusion_pytorch_model.safetensors"
-  --max_train_steps 80000
+  # --init_weights_from_safetensors "/mnt/data/world_model/zelda_runs/mg_finetune_zelda_warmup/checkpoint-10000/transformer/diffusion_pytorch_model.safetensors"
+  --max_train_steps 0
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1

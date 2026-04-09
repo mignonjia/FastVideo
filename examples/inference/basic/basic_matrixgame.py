@@ -12,7 +12,7 @@ def main():
     # If a local path is provided, FastVideo will make a best effort
     # attempt to identify the optimal arguments.
     generator = VideoGenerator.from_pretrained(
-        model_path="../mg_models/Solaris-SF-30K-8K-18K",
+        model_path="FastVideo/Matrix-Game-2.0-Base-Diffusers",
         # FastVideo will automatically handle distributed setup
         num_gpus=1,
         use_fsdp_inference=True,

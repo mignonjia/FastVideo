@@ -823,6 +823,7 @@ class TrainingArgs(FastVideoArgs):
     # validation & logs
     validation_dataset_file: str = ""
     validation_preprocessed_path: str = ""
+    validation_num_frames: int = 0
     validation_sampling_steps: str = ""
     validation_guidance_scale: str = ""
     validation_steps: float = 0.0
@@ -1063,6 +1064,9 @@ class TrainingArgs(FastVideoArgs):
         parser.add_argument("--validation-preprocessed-path",
                             type=str,
                             help="Path to processed validation dataset")
+        parser.add_argument("--validation-num-frames",
+                            type=int,
+                            help="Number of frames to generate during validation")
         parser.add_argument("--validation-sampling-steps",
                             type=str,
                             help="Validation sampling steps")

@@ -42,9 +42,9 @@ echo "RUN_NAME: $RUN_NAME"
 MODEL_PATH="/mnt/data/world_model/mg_zelda_df"
 DATA_DIR="/mnt/data/world_model/zelda_data/zeldam2-v2"
 VALIDATION_DATASET_FILE="/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/validation_zelda.json"
-RUN_NAME="mg_zelda_init_from_bi_68500"
+RUN_NAME="mg_zelda_init_from_df_17000"
 OUTPUT_DIR="/mnt/data/world_model/zelda_runs/checkpoints/$RUN_NAME"
-CKPT_PATH="/mnt/data/world_model/zelda_runs/mg_finetune_zelda_no_warmup/checkpoint-best-step-68500-df-init/transformer/diffusion_pytorch_model.safetensors"
+CKPT_PATH="/mnt/data/world_model/zelda_runs/checkpoints/mg_zelda_init_from_bi_80000/checkpoint-best-step-17000/transformer/diffusion_pytorch_model.safetensors"
 
 # Configs
 NUM_GPUS=8

@@ -1,0 +1,44 @@
+{
+    "data": [
+        {
+            "caption": "00 Val-00: W",
+            "image_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/5TTrlqAguhQ_chunk_0484/frames/run_ahead.png",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/W.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "01 Val-01: S",
+            "image_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/-BxyBxfDKA0_chunk_0292/frames/still.png",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/S.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "02 Val-02: A",
+            "image_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/5TTrlqAguhQ_chunk_0006/frames/still.png",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/A.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "03 Val-03: D",
+            "image_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/N6ObBAt41bg_chunk_0300/frames/run_right.png",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/D.npy",
+            "video_path": null,
+            "num_inference_steps": 4,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        }
+    ]
+}

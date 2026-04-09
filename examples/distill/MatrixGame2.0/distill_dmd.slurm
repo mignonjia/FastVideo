@@ -1,8 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=mg-diag
-#SBATCH --partition=main
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
+#SBATCH --job-name=mg-sf
+#SBATCH --nodes=3
+#SBATCH --ntasks=3
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -39,16 +38,20 @@ RUN_NAME=$(date +"%m%d_%H%M")
 echo "RUN_NAME: $RUN_NAME"
 
 # Configs
-MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"
+GENERATOR_MODEL_PATH="/mnt/data/world_model/mg_zelda_df"
+# GENERATOR_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"
+REAL_SCORE_MODEL_PATH="mignonjia/mg_bidirectional_zelda"
+FAKE_SCORE_MODEL_PATH="mignonjia/mg_bidirectional_zelda"
+
 DATA_DIR="/mnt/data/world_model/zelda_data/zeldam2-v2"
-VALIDATION_DATASET_FILE="/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/validation_zelda.json"
-RUN_NAME="XXXX"
+VALIDATION_DATASET_FILE="examples/distill/MatrixGame2.0/validation_physics.json"
+VALIDATION_NUM_FRAMES=201
+RUN_NAME="mg_zelda_sf"
 OUTPUT_DIR="/mnt/data/world_model/zelda_runs/checkpoints/$RUN_NAME"
-CKPT_PATH="/mnt/data/world_model/zelda_runs/mg_finetune_zelda_no_warmup/checkpoint-best-step-68500-df-init/transformer/diffusion_pytorch_model.safetensors"
 
 # Configs
-NUM_GPUS=4
-NUM_NODES=1
+NUM_GPUS=8
+NUM_NODES=3
 NUM_TOTAL_GPUS=$((NUM_GPUS * NUM_NODES))
 
 # Training arguments
@@ -56,10 +59,10 @@ training_args=(
   --tracker_project_name "wangame_sf"
   --output_dir $OUTPUT_DIR
   --wandb_run_name $RUN_NAME
-  --max_train_steps 10000
+  --max_train_steps 0
   --train_batch_size 1
   --train_sp_batch_size 1
-  --gradient_accumulation_steps 4
+  --gradient_accumulation_steps 1
   --num_latent_t 9
   --num_height 480
   --num_width 832
@@ -68,6 +71,7 @@ training_args=(
   --simulate_generator_forward
   --num_frames 33
   --num_frame_per_block 3  # Frame generation block size for self-forcing
+  --init_weights_from_safetensors /mnt/data/world_model/zelda_runs/checkpoints/mg_zelda_sf/checkpoint-2000/ema/generator_ema.safetensors
   # --enable_gradient_masking
   # --gradient_mask_last_n_frames 21
   # --use-diagonal-denoising
@@ -98,8 +102,11 @@ dataset_args=(
 validation_args=(
   --log_validation
   --log_visualization
+  # --evaluate_ptlflow
+  # --ptlflow_dir "/mnt/home/mhuo/ptlflow"
   --visualization-steps 200
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
+  --validation_num_frames $VALIDATION_NUM_FRAMES
   --validation_steps 200
   --validation_sampling_steps "4"
   --validation_guidance_scale "6.0"
@@ -119,7 +126,9 @@ optimizer_args=(
 # Miscellaneous arguments
 miscellaneous_args=(
   --inference_mode False
-  --checkpoints_total_limit 3
+  --checkpoints_total_limit 10
+  --best_checkpoint_start_step 1
+  --best_checkpoint_top_k 10
   --training_cfg_rate 0.0
   --dit_precision "fp32"
   --flow_shift 5
@@ -148,14 +157,10 @@ self_forcing_args=(
   --context_noise 0  # Amount of noise to add during context caching (0 = no noise)
 )
 
-mkdir -p sf_train_output
-
-srun torchrun \
---nnodes $SLURM_JOB_NUM_NODES \
---nproc_per_node 8 \
---node_rank $SLURM_PROCID \
---rdzv_backend=c10d \
---rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
+if [ $NUM_NODES -eq 1 ]; then
+  torchrun \
+    --nnodes $NUM_NODES \
+    --nproc_per_node $NUM_GPUS \
     fastvideo/training/matrixgame_self_forcing_distillation_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
@@ -163,6 +168,22 @@ srun torchrun \
     "${training_args[@]}" \
     "${optimizer_args[@]}" \
     "${validation_args[@]}" \
-    "${miscellaneous_args[@]}" \
-    "${dmd_args[@]}" \
-    "${self_forcing_args[@]}"
+    "${miscellaneous_args[@]}"
+else
+    srun torchrun \
+    --nnodes $SLURM_JOB_NUM_NODES \
+    --nproc_per_node 8 \
+    --node_rank $SLURM_PROCID \
+    --rdzv_backend=c10d \
+    --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
+        fastvideo/training/matrixgame_self_forcing_distillation_pipeline.py \
+        "${parallel_args[@]}" \
+        "${model_args[@]}" \
+        "${dataset_args[@]}" \
+        "${training_args[@]}" \
+        "${optimizer_args[@]}" \
+        "${validation_args[@]}" \
+        "${miscellaneous_args[@]}" \
+        "${dmd_args[@]}" \
+        "${self_forcing_args[@]}"
+fi

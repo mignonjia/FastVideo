@@ -138,6 +138,7 @@ class ActionModule(nn.Module):
         self,
         mouse_dim_in: int = 2,
         keyboard_dim_in: int = 6,
+        keyboard_value_scale: float = 1.0,
         hidden_size: int = 128,
         img_hidden_size: int = 1536,
         keyboard_hidden_dim: int = 1024,
@@ -169,6 +170,7 @@ class ActionModule(nn.Module):
         self.local_attn_size = local_attn_size
         self.enable_mouse = enable_mouse
         self.enable_keyboard = enable_keyboard
+        self.keyboard_value_scale = float(keyboard_value_scale)
 
         self.rope_dim_list = rope_dim_list
         self.rope_theta = rope_theta
@@ -262,6 +264,13 @@ class ActionModule(nn.Module):
         # Lazy initialization: freqs will be created on first forward pass
         self._freqs_cos = None
         self._freqs_sin = None
+
+    def _scale_keyboard_condition(
+        self, keyboard_condition: torch.Tensor
+    ) -> torch.Tensor:
+        if self.keyboard_value_scale == 1.0:
+            return keyboard_condition
+        return keyboard_condition * self.keyboard_value_scale
 
     def patchify(self, x, patch_size):
         """
@@ -492,6 +501,9 @@ class ActionModule(nn.Module):
     ) -> torch.Tensor:
         pad = keyboard_condition[:, 0:1, :].expand(-1, pad_t, -1)
         keyboard_condition = torch.cat([pad, keyboard_condition], dim=1)
+        keyboard_condition = self._scale_keyboard_condition(
+            keyboard_condition
+        )
         if is_causal and kv_cache_keyboard is not None:
             keyboard_condition = keyboard_condition[
                 :,

@@ -57,6 +57,7 @@ class MatrixGameWanVideoArchConfig(WanVideoArchConfig):
             "hidden_size": 128,
             "img_hidden_size": 1536,
             "keyboard_dim_in": 4,
+            "keyboard_value_scale": 1.0,
             "keyboard_hidden_dim": 1024,
             "mouse_dim_in": 2,
             "mouse_hidden_dim": 1024,

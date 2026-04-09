@@ -925,6 +925,7 @@ class TrainingArgs(FastVideoArgs):
     reinit_action_module: bool = False
     action_warmup_steps: int = 0
     override_keyboard_dim: int | None = None
+    keyboard_value_scale: float = 1.0
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -1399,6 +1400,10 @@ class TrainingArgs(FastVideoArgs):
                             type=int,
                             default=TrainingArgs.override_keyboard_dim,
                             help="Override keyboard dimension")
+        parser.add_argument("--keyboard-value-scale",
+                            type=float,
+                            default=TrainingArgs.keyboard_value_scale,
+                            help="Multiply each keyboard action entry by this constant before action-module embedding")
 
         return parser
 

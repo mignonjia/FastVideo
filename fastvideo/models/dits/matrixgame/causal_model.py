@@ -377,6 +377,9 @@ class CausalMatrixGameTransformerBlock(nn.Module):
                 keyboard_hidden_dim=action_config["keyboard_hidden_dim"],
                 mouse_dim_in=action_config.get("mouse_dim_in", 0),
                 keyboard_dim_in=action_config["keyboard_dim_in"],
+                keyboard_value_scale=action_config.get(
+                    "keyboard_value_scale", 1.0
+                ),
                 enable_mouse=action_config["enable_mouse"],
                 enable_keyboard=action_config["enable_keyboard"],
                 windows_size=action_config["windows_size"],

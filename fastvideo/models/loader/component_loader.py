@@ -787,16 +787,26 @@ class TransformerLoader(ComponentLoader):
         dit_config.update_model_arch(config)
         override_keyboard_dim = getattr(fastvideo_args,
                                         "override_keyboard_dim", None)
+        keyboard_value_scale = float(
+            getattr(fastvideo_args, "keyboard_value_scale", 1.0)
+        )
         action_config = getattr(dit_config, "action_config", None)
         should_reinit_action = bool(
             getattr(fastvideo_args, "reinit_action_module", False)
             or override_keyboard_dim is not None)
-        if isinstance(action_config, dict) and override_keyboard_dim is not None:
+        if isinstance(action_config,
+                      dict) and (override_keyboard_dim is not None
+                                 or keyboard_value_scale != 1.0):
             action_config = deepcopy(action_config)
-            action_config["keyboard_dim_in"] = override_keyboard_dim
+            if override_keyboard_dim is not None:
+                action_config["keyboard_dim_in"] = override_keyboard_dim
+                logger.info("Overriding action keyboard_dim_in to %s",
+                            override_keyboard_dim)
+            if keyboard_value_scale != 1.0:
+                action_config["keyboard_value_scale"] = keyboard_value_scale
+                logger.info("Overriding action keyboard_value_scale to %s",
+                            keyboard_value_scale)
             dit_config.arch_config.action_config = action_config
-            logger.info("Overriding action keyboard_dim_in to %s",
-                        override_keyboard_dim)
 
         model_cls, _ = ModelRegistry.resolve_model_cls(cls_name)
 

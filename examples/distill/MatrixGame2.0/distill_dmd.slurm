@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=mg-sf
-#SBATCH --nodes=3
-#SBATCH --ntasks=3
+#SBATCH --nodes=4
+#SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -38,20 +38,21 @@ RUN_NAME=$(date +"%m%d_%H%M")
 echo "RUN_NAME: $RUN_NAME"
 
 # Configs
-GENERATOR_MODEL_PATH="/mnt/data/world_model/mg_zelda_df"
+GENERATOR_MODEL_PATH="mignonjia/mg_zelda"
 # GENERATOR_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"
-REAL_SCORE_MODEL_PATH="mignonjia/mg_bidirectional_zelda"
-FAKE_SCORE_MODEL_PATH="mignonjia/mg_bidirectional_zelda"
+REAL_SCORE_MODEL_PATH="mignonjia/mg_causal_zelda"
+FAKE_SCORE_MODEL_PATH="mignonjia/mg_causal_zelda"
 
 DATA_DIR="/mnt/data/world_model/zelda_data/zeldam2-v2"
 VALIDATION_DATASET_FILE="examples/distill/MatrixGame2.0/validation_physics.json"
-VALIDATION_NUM_FRAMES=201
-RUN_NAME="mg_zelda_sf"
+VALIDATION_NUM_FRAMES=33
+RUN_NAME="mg_zelda_sf_with_causal_teacher"
 OUTPUT_DIR="/mnt/data/world_model/zelda_runs/checkpoints/$RUN_NAME"
+KEYBOARD_VALUE_SCALE=3.0  # set to 10.0 to multiply each keyboard action entry by 10
 
 # Configs
 NUM_GPUS=8
-NUM_NODES=3
+NUM_NODES=4
 NUM_TOTAL_GPUS=$((NUM_GPUS * NUM_NODES))
 
 # Training arguments
@@ -71,7 +72,8 @@ training_args=(
   --simulate_generator_forward
   --num_frames 33
   --num_frame_per_block 3  # Frame generation block size for self-forcing
-  --init_weights_from_safetensors /mnt/data/world_model/zelda_runs/checkpoints/mg_zelda_sf/checkpoint-2000/ema/generator_ema.safetensors
+  --keyboard-value-scale $KEYBOARD_VALUE_SCALE
+  # --init_weights_from_safetensors /mnt/data/world_model/zelda_runs/checkpoints/mg_zelda_sf/checkpoint-2000/ema/generator_ema.safetensors
   # --enable_gradient_masking
   # --gradient_mask_last_n_frames 21
   # --use-diagonal-denoising
@@ -116,8 +118,8 @@ validation_args=(
 optimizer_args=(
   --learning_rate 3e-6
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 400
-  --training_state_checkpointing_steps 400
+  --weight_only_checkpointing_steps 10000
+  --training_state_checkpointing_steps 5000
   --weight_decay 0
   --betas "0.9,0.95"
   --max_grad_norm 1.0
@@ -126,9 +128,9 @@ optimizer_args=(
 # Miscellaneous arguments
 miscellaneous_args=(
   --inference_mode False
-  --checkpoints_total_limit 10
+  --checkpoints_total_limit 3
   --best_checkpoint_start_step 1
-  --best_checkpoint_top_k 10
+  --best_checkpoint_top_k 3
   --training_cfg_rate 0.0
   --dit_precision "fp32"
   --flow_shift 5

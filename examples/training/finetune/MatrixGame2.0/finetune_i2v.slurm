@@ -10,9 +10,6 @@
 #SBATCH --error=finetune_i2v_output/i2v_%j.err
 #SBATCH --exclusive
 
-# 563 without warmup
-# 564 with warmup
-
 set -e -x
 
 # Environment Setup
@@ -44,13 +41,12 @@ echo "RUN_NAME: $RUN_NAME"
 # Configs
 # MODEL_PATH="../mg_models/Solaris-6K"
 # MODEL_PATH="../mg_models/Solaris-30K"
-MODEL_PATH="/mnt/data/world_model/mg_zelda_df"
+MODEL_PATH="mignonjia/mg_bidirectional_zelda"
 # MODEL_PATH="../mg_models/Matrix-Game-2.0-Base-Diffusers"
 DATA_DIR="/mnt/data/world_model/zelda_data/zeldam2-v2"
 # DATA_DIR="/mnt/weka/home/hao.zhang/kaiqin/solaris/datasets/train_81f/preprocessed_0308"
 # DATA_DIR="/mnt/weka/home/hao.zhang/mhuo/traindata_0208_2000/data/wasd4holdrandview_simple_1key1mouse1/preprocessed"
-# VALIDATION_DATASET_FILE="/mnt/weka/home/hao.zhang/kaiqin/FastVideo_clean/examples/training/finetune/MatrixGame2.0/validation_8_vpt_mix.json"
-VALIDATION_DATASET_FILE="/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/validation_zelda.json"
+VALIDATION_DATASET_FILE="examples/training/finetune/MatrixGame2.0/validation_zelda.json"
 
 # Configs
 NUM_GPUS=8
@@ -60,21 +56,21 @@ NUM_TOTAL_GPUS=$((NUM_GPUS * NUM_NODES))
 # Training arguments
 training_args=(
   --tracker_project_name "wangame_1.3b_zelda"
-  --output_dir "/mnt/data/world_model/zelda_runs/mg_finetune_zelda_with_10k_warmup"
+  --output_dir "/mnt/data/world_model/zelda_runs/bidirectional/mg_finetune_zelda_81_frame"
   # --wandb_run_name "${RUN_NAME}_bs64_continue_resume_from_8K"
-  --wandb_run_name "mg_zelda_with_10k_warmup"
+  --wandb_run_name "mg_finetune_zelda_81_frame"
   --override_transformer_cls_name "MatrixGameWanModel"
   # --init_weights_from_safetensors "/mnt/data/world_model/zelda_runs/mg_finetune_zelda_warmup/checkpoint-10000/transformer/diffusion_pytorch_model.safetensors"
-  --max_train_steps 0
+  --max_train_steps 60000
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
   --action_warmup_steps 0
-  --num_latent_t 9
+  --num_latent_t 21
   --num_height 480
   --num_width 832
-  --num_frames 33
-  # --enable_gradient_checkpointing_type "full"
+  --num_frames 81
+  --enable_gradient_checkpointing_type "full"
   --reinit-action-module False
   # --override-keyboard-dim 23
 )
@@ -125,9 +121,9 @@ optimizer_args=(
 # Miscellaneous arguments
 miscellaneous_args=(
   --inference_mode False
-  --checkpoints_total_limit 10
+  --checkpoints_total_limit 5
   --best_checkpoint_start_step 1
-  --best_checkpoint_top_k 10
+  --best_checkpoint_top_k 5
   --training_cfg_rate 0.1
   --multi_phased_distill_schedule "4000-1"
   --not_apply_cfg_solver

@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=mg-sf
-#SBATCH --nodes=4
-#SBATCH --ntasks=4
+#SBATCH --nodes=6
+#SBATCH --ntasks=6
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -45,14 +45,14 @@ FAKE_SCORE_MODEL_PATH="mignonjia/mg_causal_zelda"
 
 DATA_DIR="/mnt/data/world_model/zelda_data/zeldam2-v2"
 VALIDATION_DATASET_FILE="examples/distill/MatrixGame2.0/validation_physics.json"
-VALIDATION_NUM_FRAMES=33
+VALIDATION_NUM_FRAMES=201
 RUN_NAME="mg_zelda_sf_with_causal_teacher"
 OUTPUT_DIR="/mnt/data/world_model/zelda_runs/checkpoints/$RUN_NAME"
 KEYBOARD_VALUE_SCALE=3.0  # set to 10.0 to multiply each keyboard action entry by 10
 
 # Configs
 NUM_GPUS=8
-NUM_NODES=4
+NUM_NODES=6
 NUM_TOTAL_GPUS=$((NUM_GPUS * NUM_NODES))
 
 # Training arguments
@@ -60,7 +60,7 @@ training_args=(
   --tracker_project_name "wangame_sf"
   --output_dir $OUTPUT_DIR
   --wandb_run_name $RUN_NAME
-  --max_train_steps 0
+  --max_train_steps 50
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1

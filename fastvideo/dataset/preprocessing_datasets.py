@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from os.path import join as opj
 from typing import Any
 
+import av
 import numpy as np
 import torch
 import torchvision
@@ -264,8 +265,15 @@ class VideoTransformStage(DatasetStage):
         assert os.path.exists(batch.path), f"file {batch.path} do not exist!"
         assert batch.sample_frame_index is not None, "Frame indices must be set before transformation"
 
-        torchvision_video, _, metadata = torchvision.io.read_video(
-            batch.path, output_format="TCHW")
+        # torchvision.io.read_video removed in torchvision>=0.26; use pyav
+        frames = []
+        with av.open(batch.path) as container:
+            stream = container.streams.video[0]
+            for frame in container.decode(stream):
+                frames.append(
+                    torch.from_numpy(frame.to_ndarray(format="rgb24")))
+        torchvision_video = torch.stack(frames)  # (T, H, W, C)
+        torchvision_video = torchvision_video.permute(0, 3, 1, 2)  # (T, C, H, W)
         video = torchvision_video[batch.sample_frame_index]
         if self.transform is not None:
             video = self.transform(video)

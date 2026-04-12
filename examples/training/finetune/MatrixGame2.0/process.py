@@ -33,6 +33,8 @@ VIDEO_OUTPUT_DIR = os.path.join(BASE_OUTPUT_DIR, 'videos')
 # Slicing Configuration
 FRAME_START = 11
 FRAME_COUNT = 81
+OUTPUT_WIDTH = 832
+OUTPUT_HEIGHT = 480
 # MOUSE_SHIFT is now calculated dynamically inside process_episode
 ZERO_FIRST_FRAME = False # If True, first frame action is [0,0...] and others shift back
 NUM_SHARDS = DEFAULT_NUM_SHARDS # Split output into N parts
@@ -131,6 +133,10 @@ def _parse_args():
     parser.add_argument("--ffmpeg-threads", type=int, default=DEFAULT_FFMPEG_THREADS, help="Pass `-threads N` to ffmpeg.")
     parser.add_argument("--ffmpeg-preset", type=str, default=DEFAULT_FFMPEG_PRESET, help="x264 preset used by ffmpeg.")
     parser.add_argument("--ffmpeg-crf", type=int, default=DEFAULT_FFMPEG_CRF, help="x264 CRF used by ffmpeg (lower=better quality).")
+    parser.add_argument("--no-validate-4consistent", action="store_true", default=False, help="Skip the 4-frame block consistency check on actions.")
+    parser.add_argument("--ffmpeg-bin", type=str, default="ffmpeg", help="Path to ffmpeg binary.")
+    parser.add_argument("--output-width", type=int, default=OUTPUT_WIDTH, help="Output video width (default 832).")
+    parser.add_argument("--output-height", type=int, default=OUTPUT_HEIGHT, help="Output video height (default 480).")
     return parser.parse_args()
 
 def _discover_episode_dirs(data_dir: str, cache_path: str | None, use_find: bool) -> list[str]:
@@ -273,14 +279,15 @@ def process_episode(episode_dir, episode_id):
     mouse_arr = np.array(sliced_ms, dtype=np.float32)
     
     # Validate: every 4 frames should be consistent (scheme=4)
-    is_valid, validation_reason = _validate_action_scheme4(keyboard_arr, mouse_arr)
-    if not is_valid:
-        return {
-            "skipped_validation": True,
-            "reason": validation_reason,
-            "episode_id": episode_id,
-            "episode_dir": episode_dir
-        }
+    if not SKIP_VALIDATE_4CONSISTENT:
+        is_valid, validation_reason = _validate_action_scheme4(keyboard_arr, mouse_arr)
+        if not is_valid:
+            return {
+                "skipped_validation": True,
+                "reason": validation_reason,
+                "episode_id": episode_id,
+                "episode_dir": episode_dir
+            }
     
     action_dict = {
         'keyboard': keyboard_arr,
@@ -297,10 +304,11 @@ def process_episode(episode_dir, episode_id):
     output_action_full = os.path.join(action_video_dir, output_action_rel)
     
     # 3. Video Slicing
+    ffmpeg_bin = FFMPEG_BIN
     ffmpeg_video_cmd = [
-        'ffmpeg', '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
+        ffmpeg_bin, '-y', '-hide_banner', '-loglevel', 'error', '-nostdin',
         '-i', video_path,
-        '-vf', f"select='between(n,{FRAME_START},{FRAME_START + FRAME_COUNT - 1})'",
+        '-vf', f"select='between(n,{FRAME_START},{FRAME_START + FRAME_COUNT - 1})',scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}",
         '-vsync', 'vfr',
         '-an',
         '-threads', str(FFMPEG_THREADS),
@@ -333,6 +341,10 @@ args = _parse_args()
 DATA_DIR = args.data_dir
 BASE_OUTPUT_DIR = args.base_output_dir
 VIDEO_OUTPUT_DIR = os.path.join(BASE_OUTPUT_DIR, "videos")
+SKIP_VALIDATE_4CONSISTENT = args.no_validate_4consistent
+FFMPEG_BIN = args.ffmpeg_bin
+OUTPUT_WIDTH = args.output_width
+OUTPUT_HEIGHT = args.output_height
 os.makedirs(VIDEO_OUTPUT_DIR, exist_ok=True)
 NUM_WORKERS = args.workers
 NUM_SHARDS = args.shards
@@ -431,7 +443,7 @@ for action_type, type_results in sorted(results_by_type.items()):
                 "path": res["path"],
                 "cap": [""],
                 "action_path": res["action_path"],
-                "resolution": {"width": 640, "height": 352},
+                "resolution": {"width": OUTPUT_WIDTH, "height": OUTPUT_HEIGHT},
                 "num_frames": FRAME_COUNT,
                 "fps": 25,
                 "duration": round(FRAME_COUNT / 25, 2)
@@ -440,8 +452,8 @@ for action_type, type_results in sorted(results_by_type.items()):
                 "video_path": f"videos/{res['path']}",
                 "action_path": f"videos/{res['action_path']}",
                 "num_frames": FRAME_COUNT,
-                "width": 640,
-                "height": 352,
+                "width": OUTPUT_WIDTH,
+                "height": OUTPUT_HEIGHT,
                 "episode_id": res["episode_id"]
             })
 

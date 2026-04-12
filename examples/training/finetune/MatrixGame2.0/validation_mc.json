@@ -1,0 +1,164 @@
+{
+    "data": [
+        {
+            "caption": "00 MC-aonly_alpha1: 000228",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/00_aonly_alpha1_000228.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/00_aonly_alpha1_000228_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 81
+        },
+        {
+            "caption": "01 MC-aonly_alpha1: 000051",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/01_aonly_alpha1_000051.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/01_aonly_alpha1_000051_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 81
+        },
+        {
+            "caption": "02 MC-cam_view12hold_alpha1: 007098",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/02_cam_view12hold_alpha1_007098.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/02_cam_view12hold_alpha1_007098_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 81
+        },
+        {
+            "caption": "03 MC-cam_view12hold_alpha1: 003277",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/03_cam_view12hold_alpha1_003277.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/03_cam_view12hold_alpha1_003277_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 81
+        },
+        {
+            "caption": "04 MC-donly_alpha1: 009570",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/04_donly_alpha1_009570.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/04_donly_alpha1_009570_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 81
+        },
+        {
+            "caption": "05 MC-donly_alpha1: 009526",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/05_donly_alpha1_009526.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/05_donly_alpha1_009526_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 81
+        },
+        {
+            "caption": "06 MC-sonly_alpha1: 010378",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/06_sonly_alpha1_010378.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/06_sonly_alpha1_010378_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 81
+        },
+        {
+            "caption": "07 MC-sonly_alpha1: 010302",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/07_sonly_alpha1_010302.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/07_sonly_alpha1_010302_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 81
+        },
+        {
+            "caption": "08 MC-static_alpha1: 011809",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/08_static_alpha1_011809.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/08_static_alpha1_011809_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 81
+        },
+        {
+            "caption": "09 MC-static_alpha1: 011875",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/09_static_alpha1_011875.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/09_static_alpha1_011875_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 81
+        },
+        {
+            "caption": "10 MC-wasd12hold_alpha1: 019443",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/10_wasd12hold_alpha1_019443.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/10_wasd12hold_alpha1_019443_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 81
+        },
+        {
+            "caption": "11 MC-wasd12hold_alpha1: 016602",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/11_wasd12hold_alpha1_016602.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/11_wasd12hold_alpha1_016602_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 81
+        },
+        {
+            "caption": "12 MC-wasd12holdrandview_alpha1: 021008",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/12_wasd12holdrandview_alpha1_021008.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/12_wasd12holdrandview_alpha1_021008_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 81
+        },
+        {
+            "caption": "13 MC-wasd12holdrandview_alpha1: 025133",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/13_wasd12holdrandview_alpha1_025133.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/13_wasd12holdrandview_alpha1_025133_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 81
+        },
+        {
+            "caption": "14 MC-wonly_alpha1: 028917",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/14_wonly_alpha1_028917.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/14_wonly_alpha1_028917_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 81
+        },
+        {
+            "caption": "15 MC-wonly_alpha1: 028517",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/15_wonly_alpha1_028517.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/15_wonly_alpha1_028517_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 81
+        }
+    ]
+}

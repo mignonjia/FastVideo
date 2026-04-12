@@ -1,0 +1,324 @@
+{
+    "data": [
+        {
+            "caption": "MC-00 static: no movement",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/08_static_alpha1_011809.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/08_static_alpha1_011809_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "MC-01 W only: move forward",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/14_wonly_alpha1_028917.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/14_wonly_alpha1_028917_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "MC-02 S only: move backward",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/06_sonly_alpha1_010378.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/06_sonly_alpha1_010378_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "MC-03 A only: strafe left",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/00_aonly_alpha1_000228.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/00_aonly_alpha1_000228_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "MC-04 D only: strafe right",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/04_donly_alpha1_009570.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/04_donly_alpha1_009570_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "MC-05 cam view hold: camera only",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/02_cam_view12hold_alpha1_007098.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/02_cam_view12hold_alpha1_007098_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "MC-06 wasd hold: multi-key movement",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/10_wasd12hold_alpha1_019443.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/10_wasd12hold_alpha1_019443_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "MC-07 wasd+randview: multi-key + camera",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/frames/12_wasd12holdrandview_alpha1_021008.png",
+            "action_path": "/mnt/home/mhuo/FastVideo-MG/tests/mc_validation/actions/12_wasd12holdrandview_alpha1_021008_action.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "Zelda-08 Still: no movement",
+            "image_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/5TTrlqAguhQ_chunk_0006/frames/still_2.png",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/still.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "Zelda-09 W: move forward",
+            "image_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/5TTrlqAguhQ_chunk_0484/frames/run_ahead.png",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/W.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "Zelda-10 S: move backward",
+            "image_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/-BxyBxfDKA0_chunk_0292/frames/still.png",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/S.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "Zelda-11 A: strafe left",
+            "image_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/5TTrlqAguhQ_chunk_0006/frames/still.png",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/A.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "Zelda-12 D: strafe right",
+            "image_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/N6ObBAt41bg_chunk_0300/frames/run_right.png",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/D.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "Zelda-13 u: camera up",
+            "image_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/zelda/5TTrlqAguhQ_chunk_0067/frames/fly.png",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/u.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "OOD-14 wukong S: key backward",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/assets/third-person/wukong_832x480.jpg",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/S.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "OOD-15 wukong d: camera down",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/assets/third-person/wukong_832x480.jpg",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/d.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "OOD-16 dog D: strafe right",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/assets/third-person/dog.png",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/D.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "OOD-17 dog l: camera left",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/assets/third-person/dog.png",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/l.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "OOD-18 genshin W: key forward",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/assets/third-person/genshin.png",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/W.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "OOD-19 genshin d: camera down",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/assets/third-person/genshin.png",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/d.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "OOD-20 harpy S: key backward",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/assets/third-person/Harpy-feeding-ground.png",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/S.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "OOD-21 harpy u: camera up",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/assets/third-person/Harpy-feeding-ground.png",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/u.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "OOD-22 car A: strafe left",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/assets/third-person/car.jpg",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/A.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "OOD-23 car r: camera right",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/assets/third-person/car.jpg",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/r.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "OOD-24 car+zelda_scene D: strafe right",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/assets/third-person/combine/car_zelda_scene.jpg",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/D.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "OOD-25 car+zelda_scene l: camera left",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/assets/third-person/combine/car_zelda_scene.jpg",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/l.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "OOD-26 robot+zelda_scene W: key forward",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/assets/third-person/combine/robot_zelda_scene.jpg",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/W.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "OOD-27 robot+zelda_scene u: camera up",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/assets/third-person/combine/robot_zelda_scene.jpg",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/u.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "OOD-28 zelda+car_scene S: key backward",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/assets/third-person/combine/zelda_car_scene.jpg",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/S.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "OOD-29 zelda+car_scene d: camera down",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/assets/third-person/combine/zelda_car_scene.jpg",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/d.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "OOD-30 zelda_natural_scene A: strafe left",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/assets/third-person/combine/zelda_natural_scene.jpg",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/A.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        },
+        {
+            "caption": "OOD-31 zelda_natural_scene r: camera right",
+            "image_path": "/mnt/home/mhuo/FastVideo-MG/assets/third-person/combine/zelda_natural_scene.jpg",
+            "action_path": "/mnt/home/mhuo/FastVideo/examples/training/finetune/WanGame2.1_1.3b_i2v/actions_81/r.npy",
+            "video_path": null,
+            "num_inference_steps": 40,
+            "height": 480,
+            "width": 832,
+            "num_frames": 33
+        }
+    ]
+}

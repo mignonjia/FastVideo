@@ -89,6 +89,7 @@ preprocess_output_text/
 openspec/
 
 preprocess_output/
+preprocess_mc_output/
 finetune_i2v_output/
 finetune_df_output/
 sf_train_output/

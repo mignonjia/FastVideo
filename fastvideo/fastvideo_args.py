@@ -926,6 +926,7 @@ class TrainingArgs(FastVideoArgs):
     action_warmup_steps: int = 0
     override_keyboard_dim: int | None = None
     keyboard_value_scale: float = 1.0
+    afg_guidance_scale: float = 1.0
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
@@ -1404,6 +1405,12 @@ class TrainingArgs(FastVideoArgs):
                             type=float,
                             default=TrainingArgs.keyboard_value_scale,
                             help="Multiply each keyboard action entry by this constant before action-module embedding")
+        parser.add_argument("--afg-guidance-scale",
+                            type=float,
+                            default=TrainingArgs.afg_guidance_scale,
+                            help="Action-Free Guidance scale: run a second forward pass with zero actions and "
+                            "apply guided_noise = no_action_noise + scale*(action_noise - no_action_noise). "
+                            "Set to 1.0 to disable (default).")
 
         return parser
 

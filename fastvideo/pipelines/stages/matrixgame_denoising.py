@@ -514,6 +514,43 @@ class MatrixGameCausalDenoisingStage(DenoisingStage):
                     **model_kwargs,
                 ).permute(0, 2, 1, 3, 4)
 
+            # Action-Free Guidance (AFG): analogous to CFG but conditioned on
+            # actions vs. all-zero actions. Mirrors the CFG uncond pass pattern:
+            # each pass gets its own autocast + set_forward_context block.
+            # guided = no_action + scale * (with_action - no_action)
+            afg_scale = float(
+                getattr(ctx.fastvideo_args, "afg_guidance_scale", 1.0))
+            if (self.use_action_module
+                    and current_model == self.transformer
+                    and afg_scale != 1.0
+                    and action_kwargs):
+                # Keep kv_caches (read-only, update_kv_cache=False) so the
+                # null pass matches causal context shape expectations.
+                null_action_kwargs = dict(model_kwargs)
+                # Replace action tensors with zeros; keep all other kwargs.
+                if "keyboard_cond" in action_kwargs:
+                    null_action_kwargs["keyboard_cond"] = torch.zeros_like(
+                        action_kwargs["keyboard_cond"])
+                if "mouse_cond" in action_kwargs:
+                    null_action_kwargs["mouse_cond"] = torch.zeros_like(
+                        action_kwargs["mouse_cond"])
+                with torch.autocast(device_type="cuda",
+                                    dtype=ctx.target_dtype,
+                                    enabled=ctx.autocast_enabled), \
+                    set_forward_context(current_timestep=i,
+                                        attn_metadata=attn_metadata,
+                                        forward_batch=batch):
+                    pred_noise_no_action = current_model(
+                        latent_model_input,
+                        prompt_embeds,
+                        t_expanded_noise,
+                        **ctx.image_kwargs,
+                        **ctx.pos_cond_kwargs,
+                        **null_action_kwargs,
+                    ).permute(0, 2, 1, 3, 4)
+                pred_noise_btchw = (pred_noise_no_action + afg_scale *
+                                   (pred_noise_btchw - pred_noise_no_action))
+
             if ctx.boundary_timestep is not None and t_cur >= ctx.boundary_timestep:
                 pred_video_btchw = pred_noise_to_x_bound(
                     pred_noise=pred_noise_btchw.flatten(0, 1),

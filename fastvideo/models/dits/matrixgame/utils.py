@@ -601,8 +601,8 @@ def draw_mouse_on_frame(
     crosshair_x = width - right_margin - crosshair_radius
     crosshair_y = top_margin + crosshair_radius
 
-    dx = int(-yaw * crosshair_radius * 8)
-    dy = int(pitch * crosshair_radius * 8)
+    dx = int(yaw * crosshair_radius * 8)
+    dy = int(-pitch * crosshair_radius * 8)
     max_arrow = crosshair_radius - 5
     dx = max(-max_arrow, min(max_arrow, dx))
     dy = max(-max_arrow, min(max_arrow, dy))
@@ -658,7 +658,6 @@ def overlay_validation_actions_on_frames(
         mouse_cond = np.asarray(mouse_cond, dtype=np.float32)
         if mouse_cond.ndim == 3 and mouse_cond.shape[0] == 1:
             mouse_cond = mouse_cond[0]
-        mouse_cond = swap_mouse_axes_for_validation(mouse_cond)
 
     processed_frames: list[np.ndarray] = []
     for frame_idx, frame in enumerate(frames):
@@ -671,8 +670,9 @@ def overlay_validation_actions_on_frames(
             )
 
         if mouse_cond is not None and frame_idx < len(mouse_cond):
-            yaw = float(mouse_cond[frame_idx, 0])
-            pitch = float(mouse_cond[frame_idx, 1])
+            # action convention: mouse[0]=pitch, mouse[1]=yaw
+            pitch = float(mouse_cond[frame_idx, 0])
+            yaw = float(mouse_cond[frame_idx, 1])
             draw_mouse_on_frame(frame, yaw=yaw, pitch=pitch)
 
         processed_frames.append(frame)

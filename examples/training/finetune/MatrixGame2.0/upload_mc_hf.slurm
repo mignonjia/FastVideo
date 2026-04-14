@@ -27,9 +27,16 @@ mkdir -p "$STAGING_DIR"
 # Compress each action type into split tar.gz files
 for action_dir in "$DATA_DIR"/*/; do
     action_type=$(basename "$action_dir")
-    echo "=== Compressing $action_type ==="
-
     mkdir -p "$STAGING_DIR/$action_type"
+
+    # Skip if staging files already exist (resume support)
+    if ls "$STAGING_DIR/$action_type/${action_type}.tar.gz."* &>/dev/null 2>&1; then
+        echo "=== Skipping $action_type (staging files already exist) ==="
+        ls -lh "$STAGING_DIR/$action_type/"
+        continue
+    fi
+
+    echo "=== Compressing $action_type ==="
 
     # tar preserves relative paths from DATA_DIR, split into 3GB chunks
     # Output: staging/action_type/action_type.tar.gz.00, .01, ...
@@ -51,32 +58,23 @@ api = HfApi()
 repo_id = "mignonjia/mc_third_person"
 staging_dir = "/mnt/data/world_model/MC_third_person/hf_staging"
 
-# Create dataset repo if it doesn't exist
+# Create/ensure public repo
 try:
-    api.create_repo(repo_id=repo_id, repo_type="dataset", private=True, exist_ok=True)
-    print(f"Repo {repo_id} ready")
+    api.create_repo(repo_id=repo_id, repo_type="dataset", private=False, exist_ok=True)
+    api.update_repo_visibility(repo_id=repo_id, repo_type="dataset", private=False)
+    print(f"Repo {repo_id} ready (public)")
 except Exception as e:
     print(f"Repo creation: {e}")
 
-# Upload each part, preserving action_type subfolder structure in the repo
-for action_type in sorted(os.listdir(staging_dir)):
-    action_dir = os.path.join(staging_dir, action_type)
-    if not os.path.isdir(action_dir):
-        continue
-    parts = sorted(os.listdir(action_dir))
-    print(f"\n=== Uploading {action_type}: {len(parts)} parts ===")
-    for part in parts:
-        local_path = os.path.join(action_dir, part)
-        repo_path = f"{action_type}/{part}"
-        size_gb = os.path.getsize(local_path) / 1e9
-        print(f"  Uploading {part} ({size_gb:.2f} GB) -> {repo_path}")
-        api.upload_file(
-            path_or_fileobj=local_path,
-            path_in_repo=repo_path,
-            repo_id=repo_id,
-            repo_type="dataset",
-        )
-        print(f"  Done: {part}")
+# upload_large_folder batches many files per commit (avoids 128/hr rate limit)
+# and automatically skips files already present on the hub (safe to resume).
+print(f"\nUploading {staging_dir} -> {repo_id} ...")
+api.upload_large_folder(
+    folder_path=staging_dir,
+    repo_id=repo_id,
+    repo_type="dataset",
+    ignore_patterns=["map_style_cache/**"],
+)
 
 print("\nAll uploads complete!")
 PYEOF

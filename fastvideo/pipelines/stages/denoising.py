@@ -454,6 +454,40 @@ class DenoisingStage(PipelineStage):
                                 noise_pred_text,
                                 guidance_rescale=batch.guidance_rescale,
                             )
+
+                    # Action-Free Guidance (AFG): analogous to CFG but using
+                    # zero actions as the unconditional baseline.
+                    # guided = no_action + scale * (with_action - no_action)
+                    afg_scale = float(
+                        getattr(fastvideo_args, "afg_guidance_scale", 1.0))
+                    null_action_kwargs = {
+                        k: torch.zeros_like(v)
+                        for k, v in action_kwargs.items()
+                        if k in ("keyboard_cond", "mouse_cond")
+                        and torch.is_tensor(v)
+                    }
+                    if afg_scale != 1.0 and null_action_kwargs:
+                        merged_null_action = {**action_kwargs, **null_action_kwargs}
+                        batch.is_cfg_negative = False
+                        with set_forward_context(
+                                current_timestep=i,
+                                attn_metadata=attn_metadata,
+                                forward_batch=batch,
+                        ):
+                            noise_pred_no_action = current_model(
+                                latent_model_input,
+                                prompt_embeds,
+                                t_expand,
+                                guidance=guidance_expand,
+                                **image_kwargs,
+                                **pos_cond_kwargs,
+                                **merged_null_action,
+                                **camera_kwargs,
+                                **timesteps_r_kwarg,
+                            )
+                        noise_pred = noise_pred_no_action + afg_scale * (
+                            noise_pred - noise_pred_no_action)
+
                     # Compute the previous noisy sample
                     latents = self.scheduler.step(noise_pred,
                                                   t,

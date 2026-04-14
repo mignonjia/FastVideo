@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
+import hashlib
 import os
 import pickle
 import random
@@ -94,9 +95,134 @@ class DP_SP_BatchSampler(Sampler[list[int]]):
         return len(self.sp_group_local_indices) // self.batch_size
 
 
+def _parse_data_path_specs(path: str) -> list[tuple[str, int]]:
+    """Parse comma-separated ``dir:N`` specs into (dir, repeat_count) pairs.
+
+    Syntax: ``"path1:N1,path2:N2"``
+      - ``N`` is the number of times to repeat that path's file list.
+      - ``N=0`` means skip that path entirely.
+      - If ``:N`` is omitted, ``N`` defaults to 1.
+
+    Example::
+
+        "data/mc:2,data/zelda:1"  →  [("data/mc", 2), ("data/zelda", 1)]
+    """
+    specs: list[tuple[str, int]] = []
+    for part in path.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if ":" in part:
+            dir_path, count_str = part.rsplit(":", 1)
+            count = int(count_str)
+        else:
+            dir_path, count = part, 1
+        if count > 0:
+            specs.append((dir_path.strip(), count))
+    return specs
+
+
+def _scan_parquet_files_for_path(dataset_root: str) -> list[str]:
+    """Return sorted absolute paths of all .parquet files under *dataset_root*."""
+    file_names: list[str] = []
+    for root, _, files in os.walk(dataset_root):
+        for file in sorted(files):
+            if file.endswith(".parquet"):
+                file_names.append(
+                    os.path.realpath(os.path.join(root, file)))
+    if not file_names:
+        raise FileNotFoundError(
+            "No parquet files found under dataset path: "
+            f"{dataset_root}. "
+            "Please verify this path points to preprocessed parquet data.")
+    return sorted(file_names)
+
+
 def get_parquet_files_and_length(path: str):
-    dataset_root = os.path.realpath(os.path.expanduser(path))
-    # Check if cached info exists
+    specs = _parse_data_path_specs(path)
+
+    # Single-path fast-path: keep original cache location inside dataset_root
+    # so existing cached datasets are not invalidated.
+    if len(specs) == 1:
+        dataset_root = os.path.realpath(
+            os.path.expanduser(specs[0][0]))
+        repeat = specs[0][1]
+    else:
+        dataset_root = None  # multi-path: cache stored under first path
+        repeat = None  # handled per-spec below
+
+    # ------------------------------------------------------------------
+    # Multi-path branch
+    # ------------------------------------------------------------------
+    if dataset_root is None:
+        # Use MD5 of the raw path string as cache key so it is stable
+        path_hash = hashlib.md5(path.encode()).hexdigest()[:12]
+        first_root = os.path.realpath(
+            os.path.expanduser(specs[0][0]))
+        cache_dir = os.path.join(first_root, "map_style_cache")
+        cache_file = os.path.join(cache_dir,
+                                  f"file_info_{path_hash}.pkl")
+
+        if get_world_rank() == 0:
+            cache_loaded = False
+            all_file_names: tuple[str, ...] = ()
+            all_lengths: tuple[int, ...] = ()
+
+            if os.path.exists(cache_file):
+                logger.info("Loading cached multi-path file info from %s",
+                            cache_file)
+                try:
+                    with open(cache_file, "rb") as f:
+                        all_file_names, all_lengths = pickle.load(f)
+                    missing = [p for p in all_file_names
+                               if not os.path.exists(p)]
+                    if missing:
+                        logger.warning(
+                            "Multi-path cache has %d missing files; "
+                            "rebuilding. First: %s", len(missing), missing[0])
+                        cache_loaded = False
+                    else:
+                        cache_loaded = True
+                except Exception as e:
+                    logger.error("Error loading multi-path cache: %s", e)
+                    cache_loaded = False
+
+            if not cache_loaded:
+                logger.info("Scanning parquet files for multi-path spec")
+                combined_files: list[str] = []
+                combined_lengths: list[int] = []
+                for dir_path, n in specs:
+                    root = os.path.realpath(
+                        os.path.expanduser(dir_path))
+                    files = _scan_parquet_files_for_path(root)
+                    lengths_one: list[int] = []
+                    for fp in tqdm.tqdm(
+                            files,
+                            desc=f"Reading parquet lengths: {dir_path}"):
+                        lengths_one.append(
+                            pq.ParquetFile(fp).metadata.num_rows)
+                    for _ in range(n):
+                        combined_files.extend(files)
+                        combined_lengths.extend(lengths_one)
+                # sort for deterministic order across ranks
+                pairs = sorted(zip(combined_files, combined_lengths),
+                               key=lambda x: x[0])
+                all_file_names, all_lengths = zip(*pairs, strict=True)
+                os.makedirs(cache_dir, exist_ok=True)
+                with open(cache_file, "wb") as f:
+                    pickle.dump((all_file_names, all_lengths), f)
+                logger.info("Saved multi-path file info to %s", cache_file)
+
+        get_world_group().barrier()
+        logger.info("Loading multi-path cache from %s after barrier",
+                    cache_file)
+        with open(cache_file, "rb") as f:
+            file_names_sorted, lengths_sorted = pickle.load(f)
+        return file_names_sorted, lengths_sorted
+
+    # ------------------------------------------------------------------
+    # Original single-path branch (dataset_root is set, repeat >= 1)
+    # ------------------------------------------------------------------
     cache_dir = os.path.join(dataset_root, "map_style_cache")
     cache_file = os.path.join(cache_dir, "file_info.pkl")
 
@@ -199,6 +325,11 @@ def get_parquet_files_and_length(path: str):
         raise RuntimeError(
             "Cached parquet metadata is corrupted at "
             f"{cache_file}: file count and length count do not match.")
+
+    # Apply repeat count (repeat=1 → no-op)
+    if repeat > 1:
+        file_names_sorted = file_names_sorted * repeat
+        lengths_sorted = lengths_sorted * repeat
 
     return file_names_sorted, lengths_sorted
 

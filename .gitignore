@@ -37,7 +37,8 @@ weights/
 # SSIM test outputs
 fastvideo/tests/ssim/generated_videos/
 **/.cache/**
-
+profiling/
+world_model_data
 
 # Distribution / packaging
 build/
@@ -72,6 +73,7 @@ docs/distillation/examples/
 !fastvideo/tests/ssim/reference_videos/**/*.mp4
 
 # Static images
+assets/papers/
 !docs/assets/images/**/*.png
 !comfyui/assets/**/*.png
 !comfyui/assets/**/*.gif

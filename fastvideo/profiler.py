@@ -202,23 +202,24 @@ def get_or_create_profiler(trace_dir: str | None) -> TorchProfilerController:
     logger.info("FASTVIDEO_TORCH_PROFILE_REGIONS=%s",
                 envs.FASTVIDEO_TORCH_PROFILE_REGIONS)
 
-    profiler = torch.profiler.profile(
+    # No schedule — we wrap the exact target step as a plain context manager
+    # in the training loop.  Schedule-based toggling conflicts with
+    # region-based toggling and leaves CUDA collection disabled during kernels.
+    controller = TorchProfilerController(
+        profiler=None,
         activities=_DEFAULT_ACTIVITIES,
+        trace_dir=trace_dir,
+        wait_steps=envs.FASTVIDEO_TORCH_PROFILER_WAIT_STEPS,
+        active_steps=envs.FASTVIDEO_TORCH_PROFILER_ACTIVE_STEPS,
         record_shapes=envs.FASTVIDEO_TORCH_PROFILER_RECORD_SHAPES,
         profile_memory=envs.FASTVIDEO_TORCH_PROFILER_WITH_PROFILE_MEMORY,
         with_stack=envs.FASTVIDEO_TORCH_PROFILER_WITH_STACK,
         with_flops=envs.FASTVIDEO_TORCH_PROFILER_WITH_FLOPS,
-        schedule=torch.profiler.schedule(
-            wait=envs.FASTVIDEO_TORCH_PROFILER_WAIT_STEPS,
-            warmup=envs.FASTVIDEO_TORCH_PROFILER_WARMUP_STEPS,
-            active=envs.FASTVIDEO_TORCH_PROFILER_ACTIVE_STEPS,
-        ),
-        on_trace_ready=torch.profiler.tensorboard_trace_handler(trace_dir,
-                                                                use_gzip=True),
     )
-    controller = TorchProfilerController(profiler, _DEFAULT_ACTIVITIES)
-    controller.start()
-    logger.info("Torch profiler started")
+    logger.info("Torch profiler controller ready (will capture steps %d..%d)",
+                envs.FASTVIDEO_TORCH_PROFILER_WAIT_STEPS,
+                envs.FASTVIDEO_TORCH_PROFILER_WAIT_STEPS +
+                envs.FASTVIDEO_TORCH_PROFILER_ACTIVE_STEPS - 1)
     return controller
 
 
@@ -317,6 +318,13 @@ class TorchProfilerController:
         activities: Iterable[torch.profiler.ProfilerActivity],
         config: TorchProfilerConfig | None = None,
         disabled: bool = False,
+        trace_dir: str | None = None,
+        wait_steps: int = 0,
+        active_steps: int = 1,
+        record_shapes: bool = False,
+        profile_memory: bool = False,
+        with_stack: bool = False,
+        with_flops: bool = False,
     ) -> None:
         activities_tuple = tuple(activities)
         existing = get_global_controller()
@@ -326,17 +334,24 @@ class TorchProfilerController:
             )
         if disabled:
             self._profiler = None
+            self._trace_dir = None
             return
 
-        self._profiler = profiler
+        self._profiler = profiler  # kept for legacy region() usage; None for new path
         self._activities = activities_tuple
         self._config = config or TorchProfilerConfig.from_env()
         self._collection_enabled = False
         self._active_region_depth = 0
+        self._trace_dir = trace_dir
+        self._wait_steps = wait_steps
+        self._active_steps = active_steps
+        self._record_shapes = record_shapes
+        self._profile_memory = profile_memory
+        self._with_stack = with_stack
+        self._with_flops = with_flops
         logger.info(
-            "PROFILER: TorchProfilerController initialized with config: %s",
-            self._config)
-        set_global_profiler(self._profiler)
+            "PROFILER: TorchProfilerController initialized: wait=%d active=%d trace_dir=%s",
+            wait_steps, active_steps, trace_dir)
         set_global_controller(self)
 
     @property
@@ -391,33 +406,59 @@ class TorchProfilerController:
                 logger.info("PROFILER: Decreasing active region depth to %s",
                             self._active_region_depth)
                 if self._active_region_depth == 0:
+                    # Synchronize so all async CUDA kernels are flushed into
+                    # the CUPTI buffer before collection is disabled.
+                    torch.cuda.synchronize()
                     logger.info(
                         "PROFILER: Setting collection to False upon exiting region %s",
                         region)
                     self._set_collection(False)
 
-    def start(self) -> None:
-        """Start the profiler and pause collection until a region is entered."""
+    def should_profile_step(self, step: int) -> bool:
+        """Return True if this training step should be wrapped in a profiler."""
+        if self._trace_dir is None:
+            return False
+        return self._wait_steps <= step < self._wait_steps + self._active_steps
 
-        logger.info("PROFILER: Starting profiler...")
-        if self._profiler is None:
+    @contextlib.contextmanager
+    def profile_step(self, step: int):
+        """Context manager that wraps a single training step with a fresh profiler.
+
+        Using a fresh profiler per step (no schedule, no toggle) is the only
+        reliable way to capture CUDA kernels: CUPTI starts cold inside the
+        context and is never disabled while GPU kernels are in flight.
+        """
+        if self._trace_dir is None:
+            yield
             return
-        self._profiler.start()
-        logger.info("PROFILER: Profiler started")
-        # Profiler starts with collection disabled by default.
-        logger.info("PROFILER: Setting collection to False")
-        self._set_collection(False)
-        logger.info("PROFILER: Profiler started with collection disabled")
+        prof = torch.profiler.profile(
+            activities=self._activities,
+            record_shapes=self._record_shapes,
+            profile_memory=self._profile_memory,
+            with_stack=self._with_stack,
+            with_flops=self._with_flops,
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                self._trace_dir, use_gzip=True),
+        )
+        logger.info("PROFILER: Starting profiler for step %d", step)
+        with prof:
+            yield
+        logger.info("PROFILER: Profiler done for step %d, trace saved to %s",
+                    step, self._trace_dir)
+
+    def start(self) -> None:
+        """No-op: profiler starts fresh per step via profile_step()."""
+        logger.info("PROFILER: Ready (will profile steps %d..%d into %s)",
+                    self._wait_steps,
+                    self._wait_steps + self._active_steps - 1,
+                    self._trace_dir)
+
+    def step(self) -> None:
+        """No-op: kept for API compatibility."""
 
     def stop(self) -> None:
-        """Stop the profiler after disabling collection and clearing state."""
-
-        if self._profiler is None:
-            return
-
-        logger.info("PROFILER: Stopping profiler...")
-        self._profiler.stop()
-        logger.info("PROFILER: Profiler stopped")
+        """Clear global state."""
+        logger.info("PROFILER: Stopping profiler controller")
         self._active_region_depth = 0
         set_global_profiler(None)
         set_global_controller(None)

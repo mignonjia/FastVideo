@@ -650,7 +650,12 @@ class TrainingPipeline(LoRAPipeline, ABC):
             training_batch = TrainingBatch()
             training_batch.current_timestep = step
             training_batch.current_vsa_sparsity = current_vsa_sparsity
-            training_batch = self.train_one_step(training_batch)
+            if self.profiler_controller.should_profile_step(step):
+                with self.profiler_controller.profile_step(step):
+                    training_batch = self.train_one_step(training_batch)
+                    torch.cuda.synchronize()
+            else:
+                training_batch = self.train_one_step(training_batch)
 
             loss = training_batch.total_loss
             grad_norm = training_batch.grad_norm

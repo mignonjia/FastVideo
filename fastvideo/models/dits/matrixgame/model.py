@@ -8,7 +8,11 @@ import torch.nn as nn
 
 from fastvideo.attention import DistributedAttention
 from fastvideo.configs.models.dits.matrixgame import MatrixGameWanVideoConfig
-from fastvideo.distributed.parallel_state import get_sp_world_size
+from fastvideo.distributed.communication_op import (
+    sequence_model_parallel_all_gather_with_unpad,
+    sequence_model_parallel_shard)
+from fastvideo.distributed.parallel_state import (get_sp_parallel_rank,
+                                                  get_sp_world_size)
 from fastvideo.layers.layernorm import (
     FP32LayerNorm,
     LayerNormScaleShift,
@@ -320,8 +324,12 @@ class MatrixGameTransformerBlock(nn.Module):
         # ================= Action Module =================
         if self.action_model is not None:
             if mouse_cond is not None or keyboard_cond is not None:
-                # grid_sizes is expected to be [F, H, W]
-                # ActionModule implementation takes hidden_states directly
+                # ActionModule is not SP-aware: gather full sequence, process, re-shard.
+                sp_world_size = get_sp_world_size()
+                if sp_world_size > 1:
+                    full_seq_len = hidden_states.shape[1] * sp_world_size
+                    hidden_states = sequence_model_parallel_all_gather_with_unpad(
+                        hidden_states, full_seq_len, dim=1)
                 hidden_states = self.action_model(
                     hidden_states,
                     int(grid_sizes[0]),
@@ -331,6 +339,9 @@ class MatrixGameTransformerBlock(nn.Module):
                     keyboard_cond,
                     num_frame_per_block=int(grid_sizes[0]),
                 )
+                if sp_world_size > 1:
+                    hidden_states, _ = sequence_model_parallel_shard(
+                        hidden_states, dim=1)
         # =================================================
 
         # 3. Feed-forward
@@ -463,12 +474,13 @@ class MatrixGameWanModel(BaseDiT):
         post_patch_height = height // p_h
         post_patch_width = width // p_w
 
-        # Get rotary embeddings
+        # Get rotary embeddings for the full (unsharded) sequence.
+        # We slice them to match the SP shard AFTER sharding hidden_states.
         d = self.hidden_size // self.num_attention_heads
         rope_dim_list = [d - 4 * (d // 6), 2 * (d // 6), 2 * (d // 6)]
         freqs_cos, freqs_sin = get_rotary_pos_embed(
             (
-                post_patch_num_frames * get_sp_world_size(),
+                post_patch_num_frames,
                 post_patch_height,
                 post_patch_width,
             ),
@@ -477,18 +489,31 @@ class MatrixGameWanModel(BaseDiT):
             rope_dim_list,
             dtype=torch.float32 if current_platform.is_mps() else torch.float64,
             rope_theta=10000,
-            do_sp_sharding=True,
         )
         freqs_cos = freqs_cos.to(hidden_states.device)
         freqs_sin = freqs_sin.to(hidden_states.device)
+
+        hidden_states = self.patch_embedding(hidden_states)
+        hidden_states = hidden_states.flatten(2).transpose(1, 2)
+
+        # Shard sequence across SP ranks (no-op when sp_size == 1)
+        hidden_states, original_seq_len = sequence_model_parallel_shard(
+            hidden_states, dim=1)
+
+        # Slice freqs to match this rank's sequence shard.
+        sp_world_size = get_sp_world_size()
+        if sp_world_size > 1:
+            sp_rank = get_sp_parallel_rank()
+            total_seq = freqs_cos.shape[0]
+            chunk = total_seq // sp_world_size
+            freqs_cos = freqs_cos[sp_rank * chunk:(sp_rank + 1) * chunk]
+            freqs_sin = freqs_sin[sp_rank * chunk:(sp_rank + 1) * chunk]
+
         freqs_cis = (
             (freqs_cos.float(), freqs_sin.float())
             if freqs_cos is not None
             else None
         )
-
-        hidden_states = self.patch_embedding(hidden_states)
-        hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
         if timestep.dim() == 2:
             timestep = timestep.flatten()
@@ -556,6 +581,10 @@ class MatrixGameWanModel(BaseDiT):
             2, dim=1
         )
         hidden_states = self.norm_out(hidden_states, shift, scale)
+
+        # Gather sharded sequence back before unpatchify
+        hidden_states = sequence_model_parallel_all_gather_with_unpad(
+            hidden_states, original_seq_len, dim=1)
         hidden_states = self.proj_out(hidden_states)
 
         hidden_states = hidden_states.reshape(

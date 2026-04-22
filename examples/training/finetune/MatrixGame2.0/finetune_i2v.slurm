@@ -1,5 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=mg-finetune
+#SBATCH --partition=main
 #SBATCH --nodes=4
 #SBATCH --ntasks=4
 #SBATCH --ntasks-per-node=1
@@ -20,7 +21,7 @@ else
 fi
 conda activate mhuo-fv
 
-export PYTHONPATH="/mnt/home/mhuo/FastVideo-MG:${PYTHONPATH:-}"
+export PYTHONPATH="/home/hal-mingjiahuo/FastVideo:${PYTHONPATH:-}"
 
 # Basic Info
 export WANDB_API_KEY="d5b02b05e30d8cb34c7b31c6ae10416fc26dcb66"
@@ -56,9 +57,9 @@ NUM_TOTAL_GPUS=$((NUM_GPUS * NUM_NODES))
 # Training arguments
 training_args=(
   --tracker_project_name "wangame_1.3b_zelda"
-  --output_dir "/mnt/data/world_model/zelda_runs/bidirectional/mg_finetune_zelda_81_frame"
+  --output_dir "mg_profiling"
   # --wandb_run_name "${RUN_NAME}_bs64_continue_resume_from_8K"
-  --wandb_run_name "mg_finetune_zelda_81_frame"
+  --wandb_run_name "mg_profiling"
   --override_transformer_cls_name "MatrixGameWanModel"
   # --init_weights_from_safetensors "/mnt/data/world_model/zelda_runs/mg_finetune_zelda_warmup/checkpoint-10000/transformer/diffusion_pytorch_model.safetensors"
   --max_train_steps 60000
@@ -98,9 +99,9 @@ dataset_args=(
 
 # Validation arguments
 validation_args=(
-  --log_validation
-  --evaluate_ptlflow
-  --ptlflow_dir "/mnt/home/mhuo/ptlflow"
+  # --log_validation
+  # --evaluate_ptlflow
+  # --ptlflow_dir "/mnt/home/mhuo/ptlflow"
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
   --validation_steps 500
   --validation_sampling_steps "50"

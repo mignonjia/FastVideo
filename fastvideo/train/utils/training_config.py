@@ -56,6 +56,7 @@ class CheckpointConfig:
     output_dir: str = ""
     resume_from_checkpoint: str = ""
     training_state_checkpointing_steps: int = 0
+    save_final_step_ckpt: bool = False
     checkpoints_total_limit: int = 0
 
 

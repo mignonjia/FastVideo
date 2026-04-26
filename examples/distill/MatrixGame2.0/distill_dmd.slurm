@@ -1,7 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=mg-sf
-#SBATCH --nodes=6
-#SBATCH --ntasks=6
+#SBATCH --partition=main
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -12,23 +13,23 @@
 
 set -e -x
 # Environment Setup
-if [ -f /opt/conda/etc/profile.d/conda.sh ]; then
-  source /opt/conda/etc/profile.d/conda.sh
-else
-  eval "$(/opt/conda/bin/conda shell.bash hook)"
-fi
+source ~/conda/miniconda/bin/activate
 conda activate mhuo-fv
 
-export PYTHONPATH="/mnt/home/mhuo/FastVideo-MG:${PYTHONPATH:-}"
+export PYTHONPATH="/mnt/weka/home/hao.zhang/mhuo/FastVideo:${PYTHONPATH:-}"
 
 # Basic Info
 export WANDB_API_KEY="d5b02b05e30d8cb34c7b31c6ae10416fc26dcb66"
 export WANDB_MODE="online"
 export NCCL_P2P_DISABLE=1
-export MASTER_PORT=29500
-export NODE_RANK=$SLURM_PROCID
-nodes=( $(scontrol show hostnames $SLURM_JOB_NODELIST) )
-export MASTER_ADDR=${nodes[0]}
+export MASTER_PORT=29508
+export NODE_RANK=${SLURM_PROCID:-0}
+if [ -n "${SLURM_JOB_NODELIST:-}" ]; then
+  nodes=( $(scontrol show hostnames "$SLURM_JOB_NODELIST") )
+  export MASTER_ADDR=${nodes[0]}
+else
+  export MASTER_ADDR=127.0.0.1
+fi
 export TOKENIZERS_PARALLELISM=false
 
 echo "MASTER_ADDR: $MASTER_ADDR"
@@ -38,21 +39,24 @@ RUN_NAME=$(date +"%m%d_%H%M")
 echo "RUN_NAME: $RUN_NAME"
 
 # Configs
-GENERATOR_MODEL_PATH="mignonjia/mg_zelda"
+GENERATOR_MODEL_PATH="mignonjia/mg_causal_zelda"
 # GENERATOR_MODEL_PATH="FastVideo/Matrix-Game-2.0-Base-Diffusers"
-REAL_SCORE_MODEL_PATH="mignonjia/mg_causal_zelda"
-FAKE_SCORE_MODEL_PATH="mignonjia/mg_causal_zelda"
+REAL_SCORE_MODEL_PATH="mignonjia/mg_bidirectional_zelda"
+FAKE_SCORE_MODEL_PATH="mignonjia/mg_bidirectional_zelda"
 
-DATA_DIR="/mnt/data/world_model/zelda_data/zeldam2-v2"
-VALIDATION_DATASET_FILE="examples/distill/MatrixGame2.0/validation_physics.json"
-VALIDATION_NUM_FRAMES=201
-RUN_NAME="mg_zelda_sf_with_causal_teacher"
-OUTPUT_DIR="/mnt/data/world_model/zelda_runs/checkpoints/$RUN_NAME"
-KEYBOARD_VALUE_SCALE=3.0  # set to 10.0 to multiply each keyboard action entry by 10
+DATA_DIR="/mnt/weka/home/hao.zhang/alex/wm-lab/datas/datasets/zeldam2-v2"
+VALIDATION_DATASET_FILE="examples/distill/MatrixGame2.0/validation_10s.json"
+VALIDATION_NUM_FRAMES=165
+RUN_NAME="mg_zelda_sf_m2_eval_long_ckpt2k"
+OUTPUT_DIR="/mnt/weka/home/hao.zhang/mhuo/FastVideo/outputs/matrixgame_dmd/checkpoints/$RUN_NAME"
+KEYBOARD_VALUE_SCALE=1.0  # set to 10.0 to multiply each keyboard action entry by 10
+PTLFLOW_DIR="/mnt/weka/home/hao.zhang/mhuo/ptlflow"
+PTLFLOW_CKPT="$PTLFLOW_DIR/dpflow-things-2012b5d6.ckpt"
+PTLFLOW_CALIBRATION="$PTLFLOW_DIR/calibration.json"
 
 # Configs
 NUM_GPUS=8
-NUM_NODES=6
+NUM_NODES=1
 NUM_TOTAL_GPUS=$((NUM_GPUS * NUM_NODES))
 
 # Training arguments
@@ -60,22 +64,26 @@ training_args=(
   --tracker_project_name "wangame_sf"
   --output_dir $OUTPUT_DIR
   --wandb_run_name $RUN_NAME
-  --max_train_steps 50
+  --max_train_steps 0
   --train_batch_size 1
   --train_sp_batch_size 1
   --gradient_accumulation_steps 1
-  --num_latent_t 9
+  --num_latent_t 9 # 41
   --num_height 480
   --num_width 832
   --enable_gradient_checkpointing_type "full"
   --log_visualization
   --simulate_generator_forward
-  --num_frames 33
+  --num_frames 33 # training frames; validation uses VALIDATION_NUM_FRAMES
   --num_frame_per_block 3  # Frame generation block size for self-forcing
   --keyboard-value-scale $KEYBOARD_VALUE_SCALE
-  # --init_weights_from_safetensors /mnt/data/world_model/zelda_runs/checkpoints/mg_zelda_sf/checkpoint-2000/ema/generator_ema.safetensors
+  # --streaming-max-length-schedule "700:9,3000:41"
+  # --streaming-overlap-latents 2
+  # --streaming-sink-size 1
+  # --adaptive-debug-log False
+  --init_weights_from_safetensors outputs/matrixgame_dmd/checkpoints/mg_zelda_sf_m2/checkpoint-2000_weight_only/ema/generator_ema.safetensors
   # --enable_gradient_masking
-  # --gradient_mask_last_n_frames 21
+  --gradient_mask_last_n_frames 1
   # --use-diagonal-denoising
 )
 
@@ -104,12 +112,14 @@ dataset_args=(
 validation_args=(
   --log_validation
   --log_visualization
-  # --evaluate_ptlflow
-  # --ptlflow_dir "/mnt/home/mhuo/ptlflow"
-  --visualization-steps 200
+  --evaluate_ptlflow
+  --ptlflow_dir "$PTLFLOW_DIR"
+  --ptlflow_ckpt "$PTLFLOW_CKPT"
+  --ptlflow_calibration_path "$PTLFLOW_CALIBRATION"
+  --visualization-steps 100
   --validation_dataset_file "$VALIDATION_DATASET_FILE"
   --validation_num_frames $VALIDATION_NUM_FRAMES
-  --validation_steps 200
+  --validation_steps 100
   --validation_sampling_steps "4"
   --validation_guidance_scale "6.0"
 )
@@ -118,8 +128,8 @@ validation_args=(
 optimizer_args=(
   --learning_rate 3e-6
   --mixed_precision "bf16"
-  --weight_only_checkpointing_steps 10000
-  --training_state_checkpointing_steps 5000
+  --weight_only_checkpointing_steps 1000
+  --training_state_checkpointing_steps 1000
   --weight_decay 0
   --betas "0.9,0.95"
   --max_grad_norm 1.0
@@ -127,6 +137,7 @@ optimizer_args=(
 
 # Miscellaneous arguments
 miscellaneous_args=(
+  # --mode distillation
   --inference_mode False
   --checkpoints_total_limit 3
   --best_checkpoint_start_step 1
@@ -163,6 +174,7 @@ if [ $NUM_NODES -eq 1 ]; then
   torchrun \
     --nnodes $NUM_NODES \
     --nproc_per_node $NUM_GPUS \
+    --master_port $MASTER_PORT \
     fastvideo/training/matrixgame_self_forcing_distillation_pipeline.py \
     "${parallel_args[@]}" \
     "${model_args[@]}" \
@@ -170,7 +182,9 @@ if [ $NUM_NODES -eq 1 ]; then
     "${training_args[@]}" \
     "${optimizer_args[@]}" \
     "${validation_args[@]}" \
-    "${miscellaneous_args[@]}"
+    "${miscellaneous_args[@]}" \
+    "${dmd_args[@]}" \
+    "${self_forcing_args[@]}"
 else
     srun torchrun \
     --nnodes $SLURM_JOB_NUM_NODES \

@@ -151,6 +151,7 @@ class _CallbackStateWrapper:
 class CheckpointConfig:
     save_steps: int
     keep_last: int
+    save_final_step_ckpt: bool = False
 
 
 class CheckpointManager:
@@ -208,8 +209,7 @@ class CheckpointManager:
         self.save(step)
 
     def save_final(self, step: int) -> None:
-        save_steps = int(self.config.save_steps or 0)
-        if save_steps <= 0:
+        if self._last_saved_step == step:
             return
         self.save(step)
 

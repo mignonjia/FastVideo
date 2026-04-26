@@ -905,6 +905,7 @@ class TrainingArgs(FastVideoArgs):
     fake_score_lr_scheduler: str = "constant"  # separate lr scheduler for fake_score_transformer, if not set, use lr_scheduler
     fake_score_betas: str = "0.9,0.999"  # betas for fake score optimizer, format: "beta1,beta2"
     training_state_checkpointing_steps: int = 0  # for resuming training
+    save_final_step_ckpt: bool = False
     weight_only_checkpointing_steps: int = 0  # for inference
     log_visualization: bool = False
     visualization_steps: int = 0
@@ -1132,6 +1133,11 @@ class TrainingArgs(FastVideoArgs):
             type=int,
             help=
             "Steps between training state checkpoints (for resuming training)")
+        parser.add_argument(
+            "--save-final-step-ckpt",
+            action=StoreBoolean,
+            help="Whether to save a final training-state checkpoint at max_train_steps"
+        )
         parser.add_argument(
             "--weight-only-checkpointing-steps",
             type=int,

@@ -1946,38 +1946,39 @@ class DistillationPipeline(TrainingPipeline):
 
         self.tracker.finish()
 
-        # Save final training state checkpoint
-        print("rank", self.global_rank,
-              "save final training state checkpoint at step",
-              self.training_args.max_train_steps)
-        save_distillation_checkpoint(
-            self.transformer,
-            self.fake_score_transformer,
-            self.global_rank,
-            self.training_args.output_dir,
-            self.training_args.max_train_steps,
-            self.optimizer,
-            self.fake_score_optimizer,
-            self.train_dataloader,
-            self.lr_scheduler,
-            self.fake_score_lr_scheduler,
-            self.noise_random_generator,
-            self.generator_ema,
-            # MoE support
-            generator_transformer_2=getattr(self, 'transformer_2', None),
-            real_score_transformer_2=getattr(self, 'real_score_transformer_2',
-                                             None),
-            fake_score_transformer_2=getattr(self, 'fake_score_transformer_2',
-                                             None),
-            generator_optimizer_2=getattr(self, 'optimizer_2', None),
-            fake_score_optimizer_2=getattr(self, 'fake_score_optimizer_2',
-                                           None),
-            generator_scheduler_2=getattr(self, 'lr_scheduler_2', None),
-            fake_score_scheduler_2=getattr(self, 'fake_score_lr_scheduler_2',
-                                           None),
-            generator_ema_2=getattr(self, 'generator_ema_2', None))
+        if self.training_args.save_final_step_ckpt:
+            print("rank", self.global_rank,
+                  "save final training state checkpoint at step",
+                  self.training_args.max_train_steps)
+            save_distillation_checkpoint(
+                self.transformer,
+                self.fake_score_transformer,
+                self.global_rank,
+                self.training_args.output_dir,
+                self.training_args.max_train_steps,
+                self.optimizer,
+                self.fake_score_optimizer,
+                self.train_dataloader,
+                self.lr_scheduler,
+                self.fake_score_lr_scheduler,
+                self.noise_random_generator,
+                self.generator_ema,
+                # MoE support
+                generator_transformer_2=getattr(self, 'transformer_2', None),
+                real_score_transformer_2=getattr(
+                    self, 'real_score_transformer_2', None),
+                fake_score_transformer_2=getattr(
+                    self, 'fake_score_transformer_2', None),
+                generator_optimizer_2=getattr(self, 'optimizer_2', None),
+                fake_score_optimizer_2=getattr(self, 'fake_score_optimizer_2',
+                                               None),
+                generator_scheduler_2=getattr(self, 'lr_scheduler_2', None),
+                fake_score_scheduler_2=getattr(
+                    self, 'fake_score_lr_scheduler_2', None),
+                generator_ema_2=getattr(self, 'generator_ema_2', None))
 
-        if self.training_args.use_ema and self.is_ema_ready():
+        if (self.training_args.save_final_step_ckpt
+                and self.training_args.use_ema and self.is_ema_ready()):
             self.save_ema_weights(self.training_args.output_dir,
                                   self.training_args.max_train_steps)
 

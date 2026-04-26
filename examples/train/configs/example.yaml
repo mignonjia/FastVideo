@@ -118,6 +118,7 @@ training:
     output_dir: outputs/my_run        # default: ""
     resume_from_checkpoint: ""        # default: "" (or use --resume-from-checkpoint CLI)
     training_state_checkpointing_steps: 1000  # default: 0 (disabled)
+    save_final_step_ckpt: false       # default: false
     checkpoints_total_limit: 3        # default: 0 (keep all)
 
   # --- training.tracker [TYPED] -> TrackerConfig ---

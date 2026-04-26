@@ -190,7 +190,8 @@ class Trainer:
             iteration=max_steps,
         )
 
-        if checkpoint_manager is not None:
+        if (checkpoint_manager is not None
+                and checkpoint_manager.config.save_final_step_ckpt):
             checkpoint_manager.save_final(max_steps)
 
         self.tracker.finish()

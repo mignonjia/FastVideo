@@ -57,6 +57,12 @@ def _apply_activation_checkpointing_blocks(module: torch.nn.Module,
         if blocks is None:
             continue
         for index, (layer_id, block) in enumerate(blocks.named_children()):
+            action_model = getattr(block, "action_model", None)
+            if action_model is not None:
+                # MatrixGame action blocks contain DTensor-sharded action MLPs.
+                # FSDP2 activation checkpoint recompute can re-enter those MLPs
+                # with regular tensors, causing mixed Tensor/DTensor dispatch.
+                continue
             if n_layer is None or index % n_layer == 0:
                 block = checkpoint_wrapper(block, preserve_rng_state=False)
                 blocks.register_module(layer_id, block)

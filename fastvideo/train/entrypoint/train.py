@@ -89,6 +89,7 @@ def run_training_from_config(
     ckpt_config = CheckpointConfig(
         save_steps=int(tc.checkpoint.training_state_checkpointing_steps or 0),
         keep_last=int(tc.checkpoint.checkpoints_total_limit or 0),
+        save_final_step_ckpt=bool(tc.checkpoint.save_final_step_ckpt),
     )
 
     checkpoint_manager = CheckpointManager(

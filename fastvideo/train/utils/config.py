@@ -346,6 +346,7 @@ def _build_training_config(
             output_dir=str(ck.get("output_dir", "") or ""),
             resume_from_checkpoint=str(ck.get("resume_from_checkpoint", "") or ""),
             training_state_checkpointing_steps=int(ck.get("training_state_checkpointing_steps", 0) or 0),
+            save_final_step_ckpt=bool(ck.get("save_final_step_ckpt", False)),
             checkpoints_total_limit=int(ck.get("checkpoints_total_limit", 0) or 0),
         ),
         tracker=TrackerConfig(

@@ -736,11 +736,14 @@ class TrainingPipeline(LoRAPipeline, ABC):
                         gpu_memory_usage, trainable_params)
 
         self.tracker.finish()
-        save_checkpoint(self.transformer, self.global_rank,
-                        self.training_args.output_dir,
-                        self.training_args.max_train_steps, self.optimizer,
-                        self.train_dataloader, self.lr_scheduler,
-                        self.noise_random_generator)
+
+        if self.training_args.save_final_step_ckpt:
+            save_checkpoint(self.transformer, self.global_rank,
+                            self.training_args.output_dir,
+                            self.training_args.max_train_steps,
+                            self.optimizer, self.train_dataloader,
+                            self.lr_scheduler,
+                            self.noise_random_generator)
 
         if envs.FASTVIDEO_TORCH_PROFILER_DIR:
             logger.info("Stopping profiler...")

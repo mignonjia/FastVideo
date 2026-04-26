@@ -96,3 +96,5 @@ preprocess_mc_output/
 finetune_i2v_output/
 finetune_df_output/
 sf_train_output/
+
+examples/training/finetune/WanGame2.1_1.3b_i2v/zelda_full

@@ -5,3 +5,4 @@
 {"name": "evaluate-video-quality", "description": "Evaluate generated video quality using available metrics (SSIM, loss trajectory, caption consistency)", "path": "evaluate-video-quality/SKILL.md", "status": "draft", "trust": "low"}
 {"name": "index-related-work", "description": "Ingest a paper or repository into the related work index", "path": "index-related-work/SKILL.md", "status": "draft", "trust": "low"}
 {"name": "search-related-work", "description": "Query the related work index for relevant papers, repos, or comparisons", "path": "search-related-work/SKILL.md", "status": "draft", "trust": "low"}
+{"name": "sync-fastvideo-m2", "description": "Pull or push the M2 FastVideo workspace over Teleport rsync while excluding W&B, generated artifacts, model weights, and files over 20 MB.", "path": "sync-fastvideo-m2/SKILL.md", "status": "draft", "trust": "low"}

@@ -34,6 +34,8 @@ env
 *.log
 weights/
 LongLive/
+Self-Forcing/
+plan/
 
 # SSIM test outputs
 fastvideo/tests/ssim/generated_videos/

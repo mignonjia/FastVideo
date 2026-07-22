@@ -26,6 +26,7 @@ from fastvideo.train.callbacks.validation import (
     DEFAULT_VALIDATION_VBENCH_METRICS,
     SYNTHETIC_OPTICAL_FLOW_LOG_KEYS,
     SYNTHETIC_OPTICAL_FLOW_METRIC,
+    TRAIN_VALIDATION_UNSUPPORTED_METRICS,
     ValidationCallback,
     _ValidationMetricStats,
 )
@@ -163,6 +164,39 @@ class TestConstructor:
         assert cb.metrics_config.loader_threads == 2
         assert cb.metrics_config.prefetch_factor == 3
         assert cb.metrics_config.log_prefix == "custom/validation"
+
+    def test_training_validation_filters_fvd(self) -> None:
+        cb = ValidationCallback(
+            pipeline_target=_PIPE_TARGET,
+            dataset_file="x.json",
+            metrics={
+                "names": ["vbench.aesthetic_quality", "common.fvd"],
+            },
+        )
+
+        assert cb.metrics_config.enabled is True
+        assert cb.metrics_config.names == ["vbench.aesthetic_quality"]
+
+    def test_training_validation_disables_metrics_when_only_fvd_requested(self) -> None:
+        cb = ValidationCallback(
+            pipeline_target=_PIPE_TARGET,
+            dataset_file="x.json",
+            metrics="common.fvd",
+        )
+
+        assert cb.metrics_config.enabled is False
+        assert cb.metrics_config.names == []
+
+    def test_unsupported_list_covers_all_set_metrics(self) -> None:
+        import fastvideo.eval  # noqa: F401  (triggers metric auto-discovery)
+        from fastvideo.eval.registry import _REGISTRY
+
+        set_metrics = {name for name, cls in _REGISTRY.items() if getattr(cls, "is_set_metric", False)}
+        missing = set_metrics - TRAIN_VALIDATION_UNSUPPORTED_METRICS
+        assert not missing, (
+            f"Set metrics {sorted(missing)} finalize per SP group in training-time "
+            "validation (mean-of-groups is not the corpus metric); add them to "
+            "TRAIN_VALIDATION_UNSUPPORTED_METRICS")
 
 
 # ---------------------------------------------------------------------------

@@ -66,6 +66,7 @@ class ThirdPersonCalibration:
     r_z: float = 0.0
     r_y: float = 0.0
     init_pitch: float = 0.0
+    frame_shape: tuple[int, int] | None = None
     notes: str = ""
     fit_metadata: dict = field(default_factory=dict)
 
@@ -75,7 +76,34 @@ class ThirdPersonCalibration:
     @classmethod
     def from_dict(cls, d: dict) -> ThirdPersonCalibration:
         known = {f.name for f in cls.__dataclass_fields__.values()}
-        return cls(**{k: v for k, v in d.items() if k in known})
+        kwargs = {k: v for k, v in d.items() if k in known}
+        kwargs["frame_shape"] = _normalize_frame_shape(kwargs.get("frame_shape"))
+        return cls(**kwargs)
+
+
+def _normalize_frame_shape(raw: object) -> tuple[int, int] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, list | tuple) or len(raw) != 2:
+        raise ValueError(f"frame_shape must be [height, width], got {raw!r}")
+    return (
+        _normalize_frame_dim(raw[0], raw=raw),
+        _normalize_frame_dim(raw[1], raw=raw),
+    )
+
+
+def _normalize_frame_dim(value: object, *, raw: object) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"frame_shape must contain positive integers, got {raw!r}")
+    if isinstance(value, int):
+        dim = value
+    elif isinstance(value, float) and value.is_integer() or isinstance(value, str) and value.strip().isdigit():
+        dim = int(value)
+    else:
+        raise ValueError(f"frame_shape must contain positive integers, got {raw!r}")
+    if dim <= 0:
+        raise ValueError(f"frame_shape must contain positive integers, got {raw!r}")
+    return dim
 
 
 def load_calibration(path: str | Path) -> ThirdPersonCalibration:

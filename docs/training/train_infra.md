@@ -172,7 +172,7 @@ training:
       data/multi3d_games: 2
 ```
 
-The repeat count duplicates that dataset's parquet file list before shuffling/sampling, so the example above trains with roughly twice as much `multi3d_games` exposure as `zeldam2-clean`. Paths are just suggested locations; use any local path that contains a FastVideo preprocessed parquet dataset.
+Repeat counts must be positive integers. They duplicate that dataset's parquet file list before shuffling/sampling, so the example above trains with roughly twice as much `multi3d_games` exposure as `zeldam2-clean`. Fractional weighting such as `1.5` is not supported. Paths are just suggested locations; use any local path that contains a FastVideo preprocessed parquet dataset.
 
 See [Training Trackers](trackers.md) to configure Weights & Biases or SwanLab,
 including SwanLab installation and authentication.

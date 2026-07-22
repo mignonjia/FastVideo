@@ -20,7 +20,9 @@ Required sample keys
 ``calibration``
     Either a path to a ``ThirdPersonCalibration`` JSON file, or a dict
     of fitted parameters. May also be set once at construction time via
-    ``calibration_path=`` and reused across samples.
+    ``calibration_path=`` and reused across samples. If the calibration
+    records ``frame_shape``, frames are resized to that shape before
+    observed flow extraction and synthetic-flow generation.
 
 Optional sample keys
 --------------------
@@ -34,6 +36,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 
 from fastvideo.eval.metrics.base import BaseMetric
 from fastvideo.eval.metrics.optical_flow._shared import (
@@ -57,6 +60,23 @@ def _resolve_calibration(obj: str | Path | dict | ThirdPersonCalibration, ) -> T
     if isinstance(obj, dict):
         return ThirdPersonCalibration.from_dict(obj)
     return load_calibration(obj)
+
+
+def _resize_video_to_calibration_shape(
+    video: torch.Tensor,
+    calibration: ThirdPersonCalibration,
+) -> tuple[torch.Tensor, tuple[int, int], bool]:
+    source_shape = (int(video.shape[2]), int(video.shape[3]))
+    target_shape = calibration.frame_shape
+    if target_shape is None or target_shape == source_shape:
+        return video, source_shape, False
+    resized = F.interpolate(
+        video,
+        size=target_shape,
+        mode="bilinear",
+        align_corners=False,
+    )
+    return resized, target_shape, True
 
 
 @register("optical_flow.synthetic_optical_flow")
@@ -130,19 +150,20 @@ class SyntheticOpticalFlowMetric(BaseMetric):
         if T < 2:
             raise ValueError("Need at least 2 frames to compute optical flow")
         n_pairs = T - 1
+        video_for_flow, evaluated_shape, resized_for_calibration = _resize_video_to_calibration_shape(video, cal)
 
         mouse_pitch_sign = int(sample.get("mouse_pitch_sign", 1))
         chunk = self._chunk_size or 16
 
         observed = extract_video_flows(
             self._model,
-            video,
+            video_for_flow,
             chunk=chunk,
             device=self.device,
         )
         predictor = ThirdPersonFlowGenerator(
             calibration=cal,
-            frame_shape=(H, W),
+            frame_shape=evaluated_shape,
             mouse_pitch_sign=mouse_pitch_sign,
         )
         predicted = predictor.generate_flow_sequence(actions, n_pairs=n_pairs)
@@ -161,6 +182,9 @@ class SyntheticOpticalFlowMetric(BaseMetric):
         score = summary.get("pixel_epe_mean_mean")
         details = dict(summary)
         details["per_frame_metrics"] = per_frame
+        details["input_frame_shape"] = [int(H), int(W)]
+        details["evaluated_frame_shape"] = [int(evaluated_shape[0]), int(evaluated_shape[1])]
+        details["resized_for_calibration"] = resized_for_calibration
         return MetricResult(
             name=self.name,
             score=float(score) if score is not None else None,

@@ -141,7 +141,6 @@ callbacks:
         - vbench.imaging_quality
         - vbench.aesthetic_quality
         - optical_flow.synthetic_optical_flow
-        - common.fvd
       skip_missing_deps: true
       strict: false
       unload_after_validation: true
@@ -151,14 +150,19 @@ callbacks:
       calibration_path: assets/eval/worldmodel_synthetic_flow_calibration.json
 ```
 
+If the synthetic-flow calibration records `frame_shape`, validation
+resizes generated frames to that shape before extracting observed flow
+and generating the analytic flow target. The Zelda calibration records
+`frame_shape: [352, 640]`, so Zelda validation videos are evaluated at
+352x640 for this metric even when the generated video is 480x832.
+
 Metric summaries are written under
 `<output_dir>/eval/step_<step>/inference_steps_<n>_rank_<rank>.json` and
 scalar means are logged with the `metrics/validation/...` prefix.
 Install `fastvideo[eval]` for optical-flow dependencies such as
 `ptlflow`; VBench metrics use the pinned submodule under
-`fastvideo/third_party/eval/vbench`. FVD uses `ref_video` entries from
-the validation manifest when present, or the standard
-`FASTVIDEO_FVD_REF_FEATURES` / eval-cache reference feature path.
+`fastvideo/third_party/eval/vbench`. FVD (`common.fvd`) is not supported
+in training-time validation.
 
 ### CLI
 

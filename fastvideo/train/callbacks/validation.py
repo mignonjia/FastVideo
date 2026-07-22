@@ -95,6 +95,16 @@ DEFAULT_VALIDATION_VBENCH_METRICS = [
     "vbench.dynamic_degree",
 ]
 
+# Set-vs-set metrics (is_set_metric=True) finalize per SP group during
+# training-time validation, and averaging the per-group scalars is not the
+# corpus-level metric. Every is_set_metric=True metric must be listed here;
+# a registry-sync test in test_validation.py enforces this.
+TRAIN_VALIDATION_UNSUPPORTED_METRICS = frozenset({
+    "common.fvd",
+    "audio.frechet_distance",
+    "judge.third_person_separation",
+})
+
 SYNTHETIC_OPTICAL_FLOW_METRIC = "optical_flow.synthetic_optical_flow"
 SYNTHETIC_OPTICAL_FLOW_LOG_KEYS = (
     "mf_epe_mean",
@@ -166,19 +176,22 @@ class ValidationCallback(Callback):
         if config is None or config is False:
             return _ValidationMetricsConfig(enabled=False)
         if config is True:
+            names = ValidationCallback._filter_train_validation_metrics(list(DEFAULT_VALIDATION_VBENCH_METRICS))
             return _ValidationMetricsConfig(
-                enabled=True,
-                names=list(DEFAULT_VALIDATION_VBENCH_METRICS),
+                enabled=bool(names),
+                names=names,
             )
         if isinstance(config, str):
+            names = ValidationCallback._filter_train_validation_metrics([config])
             return _ValidationMetricsConfig(
-                enabled=True,
-                names=[config],
+                enabled=bool(names),
+                names=names,
             )
         if isinstance(config, list | tuple):
+            names = ValidationCallback._filter_train_validation_metrics([str(name) for name in config])
             return _ValidationMetricsConfig(
-                enabled=bool(config),
-                names=[str(name) for name in config],
+                enabled=bool(names),
+                names=names,
             )
         if not isinstance(config, dict):
             raise TypeError("callbacks.validation.metrics must be a bool, string, list, or mapping")
@@ -191,6 +204,7 @@ class ValidationCallback(Callback):
             names = [raw_names]
         else:
             names = [str(name) for name in raw_names]
+        names = ValidationCallback._filter_train_validation_metrics(names)
 
         return _ValidationMetricsConfig(
             enabled=enabled and bool(names),
@@ -205,6 +219,17 @@ class ValidationCallback(Callback):
             prefetch_factor=int(config.get("prefetch_factor", 2)),
             log_prefix=str(config.get("log_prefix", "metrics/validation")),
         )
+
+    @staticmethod
+    def _filter_train_validation_metrics(names: list[str]) -> list[str]:
+        filtered = [name for name in names if name not in TRAIN_VALIDATION_UNSUPPORTED_METRICS]
+        if len(filtered) != len(names):
+            skipped = sorted(set(names) - set(filtered))
+            logger.warning(
+                "Ignoring unsupported training-time validation metric(s): %s",
+                ", ".join(skipped),
+            )
+        return filtered
 
     @staticmethod
     def _coerce_bool(value: Any) -> bool:

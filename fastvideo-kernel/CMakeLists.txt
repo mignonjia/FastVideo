@@ -72,7 +72,7 @@ if(NOT GPU_BACKEND STREQUAL "ROCM")
         else()
             # Best-effort probe of the visible GPU (mirrors build.sh detect_with_torch).
             execute_process(
-                COMMAND "${Python_EXECUTABLE}" -c "import torch; assert torch.cuda.is_available(); mj, mn = torch.cuda.get_device_capability(0); print(f'{mj}.{mn}a' if (mj, mn) in ((9, 0), (12, 0)) else f'{mj}.{mn}')"
+                COMMAND "${Python_EXECUTABLE}" -c "import torch; assert torch.cuda.is_available(); mj, mn = torch.cuda.get_device_capability(0); print(f'{mj}.{mn}a' if (mj, mn) in ((9, 0), (10, 0), (10, 3), (12, 0)) else f'{mj}.{mn}')"
                 OUTPUT_VARIABLE _FV_ARCH_LIST
                 OUTPUT_STRIP_TRAILING_WHITESPACE
                 RESULT_VARIABLE _fv_detect_rc
@@ -114,7 +114,63 @@ list(APPEND TORCH_INCLUDE_DIRS ${TORCH_INCLUDE_PATHS})
 # Find Torch package (still useful for libraries)
 find_package(Torch REQUIRED)
 
-# Include directories
+# The Ulysses kernel needs NCCL's 2.29 device API. Keep it optional so ROCm,
+# older NCCL installs, and minimal CUDA builders still produce a usable wheel.
+set(FASTVIDEO_KERNEL_BUILD_ULYSSES_A2A "AUTO" CACHE STRING
+    "Build the NCCL-device-API Ulysses all-to-all: AUTO/ON/OFF")
+set_property(CACHE FASTVIDEO_KERNEL_BUILD_ULYSSES_A2A PROPERTY STRINGS AUTO ON OFF)
+set(ENABLE_ULYSSES_A2A OFF)
+
+if(NOT GPU_BACKEND STREQUAL "ROCM" AND NOT FASTVIDEO_KERNEL_BUILD_ULYSSES_A2A STREQUAL "OFF")
+    # nvidia.nccl is a namespace package, so find_spec rather than __file__.
+    execute_process(COMMAND "${Python_EXECUTABLE}" -c
+        "import importlib.util as u;s=u.find_spec('nvidia.nccl');print(list(s.submodule_search_locations)[0] if s else '')"
+        OUTPUT_VARIABLE NCCL_PIP_ROOT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    find_path(NCCL_INCLUDE_DIR nccl_device/coop.h
+        HINTS $ENV{NCCL_HOME}/include ${NCCL_PIP_ROOT}/include)
+    find_library(NCCL_LIBRARY NAMES nccl
+        HINTS $ENV{NCCL_HOME}/lib $ENV{NCCL_HOME}/lib64 ${NCCL_PIP_ROOT}/lib)
+    # PyPI's nvidia-nccl-cu* wheels ship the SONAME but not the development
+    # symlink (libnccl.so.2, no libnccl.so). Accept that exact versioned name;
+    # target_link_libraries can link an absolute SONAME path directly.
+    if(NOT NCCL_LIBRARY)
+        find_file(NCCL_VERSIONED_LIBRARY NAMES libnccl.so.2
+            HINTS $ENV{NCCL_HOME}/lib $ENV{NCCL_HOME}/lib64 ${NCCL_PIP_ROOT}/lib)
+        if(NCCL_VERSIONED_LIBRARY)
+            set(NCCL_LIBRARY "${NCCL_VERSIONED_LIBRARY}")
+        endif()
+    endif()
+
+    if(NCCL_INCLUDE_DIR AND NCCL_LIBRARY)
+        include(CheckCXXSourceCompiles)
+        set(_FASTVIDEO_REQUIRED_INCLUDES "${CMAKE_REQUIRED_INCLUDES}")
+        # nccl.h includes cuda_runtime.h, so a host-compiler feature probe
+        # needs the toolkit includes explicitly even though CUDA is enabled.
+        set(CMAKE_REQUIRED_INCLUDES "${NCCL_INCLUDE_DIR};${CUDAToolkit_INCLUDE_DIRS}")
+        unset(NCCL_HAS_REQUIRED_DEVICE_API CACHE)
+        check_cxx_source_compiles("\
+#define NCCL_HOSTLIB_ONLY
+#include <cstddef>
+#include <nccl_device.h>
+int main() {
+  ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+  ncclCommProperties props = NCCL_COMM_PROPERTIES_INITIALIZER;
+  return (reqs.size == 0 || props.size == 0);
+}"
+            NCCL_HAS_REQUIRED_DEVICE_API)
+        set(CMAKE_REQUIRED_INCLUDES "${_FASTVIDEO_REQUIRED_INCLUDES}")
+    endif()
+
+    if(NCCL_HAS_REQUIRED_DEVICE_API)
+        set(ENABLE_ULYSSES_A2A ON)
+    elseif(FASTVIDEO_KERNEL_BUILD_ULYSSES_A2A STREQUAL "ON")
+        message(FATAL_ERROR
+            "FASTVIDEO_KERNEL_BUILD_ULYSSES_A2A=ON requires NCCL device headers/library "
+            "with NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER (NCCL 2.29+). "
+            "Resolved include='${NCCL_INCLUDE_DIR}', library='${NCCL_LIBRARY}'.")
+    endif()
+endif()
+
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/include/cutlass/include
@@ -124,6 +180,9 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/csrc/turbodiffusion
     ${TORCH_INCLUDE_DIRS}
 )
+if(ENABLE_ULYSSES_A2A)
+    include_directories(${NCCL_INCLUDE_DIR})
+endif()
 
 # ---------------------------
 # ThunderKittens (TK) toggles
@@ -157,6 +216,7 @@ endif()
 message(STATUS "TORCH_CUDA_ARCH_LIST (cmake/env): ${TORCH_CUDA_ARCH_LIST}")
 message(STATUS "FASTVIDEO_KERNEL_BUILD_TK: ${FASTVIDEO_KERNEL_BUILD_TK}")
 message(STATUS "FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER: ${FASTVIDEO_KERNEL_BUILD_ATTN_QAT_INFER}")
+message(STATUS "FASTVIDEO_KERNEL_BUILD_ULYSSES_A2A: ${FASTVIDEO_KERNEL_BUILD_ULYSSES_A2A}")
 
 set(ENABLE_TK_KERNELS OFF)
 if(FASTVIDEO_KERNEL_BUILD_TK STREQUAL "ON")
@@ -307,6 +367,9 @@ if(BUILD_CXX_KERNELS)
         csrc/turbodiffusion/norm/layernorm.cu
         csrc/turbodiffusion/quant/quant.cu
     )
+    if(ENABLE_ULYSSES_A2A)
+        list(APPEND EXTENSION_SOURCES csrc/comm/ulysses_all_to_all.cu)
+    endif()
     
     # Conditionally add TK kernels
     if(ENABLE_TK_KERNELS)
@@ -318,6 +381,44 @@ if(BUILD_CXX_KERNELS)
 
     # Combined FastVideo Extension
     # Using name 'fastvideo_kernel_ops' to distinguish from the python package namespace
+    # ---------------------------------------------------------------------------
+    # VSA block-sparse attention forward, data-center Blackwell (sm_100a/sm_103a).
+    #
+    # NOTE the "a" suffix: these kernels use architecture-conditional tcgen05 / setmaxnreg
+    # instructions. Explicit gencode entries are required for both the GB200 (sm_100a) and
+    # B300/GB300 (sm_103a) images. The source body is shared; ptxas specializes each image.
+    #
+    # Built for 64-token sparse blocks -- FastVideo's default (4,4,4) tiling, so no
+    # tile-size change and no top-k granularity change is needed. VSA_BHSD
+    # selects [B, H, S, D]. Both are compile-time; the Python is_supported() checks incoming
+    # tensors against them so callers fall back to Triton rather than getting a wrong answer.
+    # Read the ENVIRONMENT as well as the cache variable. When TORCH_CUDA_ARCH_LIST is
+    # exported (build.sh, and `pip install` with it set) the branch above only prints it --
+    # the cmake variable stays empty, so testing that alone silently skips the kernel and
+    # leaves a build that succeeds with the op missing.
+    set(ENABLE_VSA_SM100_FAMILY OFF)
+    set(_VSA_ARCH_LIST "${TORCH_CUDA_ARCH_LIST}")
+    if(NOT _VSA_ARCH_LIST AND DEFINED ENV{TORCH_CUDA_ARCH_LIST})
+        set(_VSA_ARCH_LIST "$ENV{TORCH_CUDA_ARCH_LIST}")
+    endif()
+    if(_VSA_ARCH_LIST MATCHES "(^|[; ,])(10\\.(0|3)a|10(0|3)a|sm_10(0|3)a)([; ,]|$)")
+        set(ENABLE_VSA_SM100_FAMILY ON)
+    endif()
+    if(ENABLE_VSA_SM100_FAMILY)
+        message(STATUS "fastvideo-kernel: building block_sparse_sm100a (sm_100a/sm_103a, 64- and 128-token blocks)")
+        list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_sm100a.cu
+                                      csrc/attention/block_sparse_blk128_sm100a.cu)
+        set_source_files_properties(csrc/attention/block_sparse_sm100a.cu
+                                    csrc/attention/block_sparse_blk128_sm100a.cu PROPERTIES
+            COMPILE_OPTIONS "-gencode;arch=compute_100a,code=sm_100a;-gencode;arch=compute_103a,code=sm_103a;-DVSA_BHSD=true")
+        # VSA block-sparse attention BACKWARD, 64-token blocks. sm_100a only for now: validated
+        # on GB200, not yet on B300/GB300, so no sm_103a image is built and the Python side keeps
+        # the Triton backward for sm_103a devices.
+        list(APPEND EXTENSION_SOURCES csrc/attention/block_sparse_bwd_sm100a.cu)
+        set_source_files_properties(csrc/attention/block_sparse_bwd_sm100a.cu PROPERTIES
+            COMPILE_OPTIONS "-gencode;arch=compute_100a,code=sm_100a;-DVSA_BHSD=true")
+    endif()
+
     Python_add_library(fastvideo_kernel_ops MODULE USE_SABI ${SKBUILD_SABI_VERSION} WITH_SOABI
         ${EXTENSION_SOURCES}
     )
@@ -333,9 +434,16 @@ if(BUILD_CXX_KERNELS)
 
     # Build compile definitions list
     set(COMPILE_DEFS TORCH_EXTENSION_NAME=fastvideo_kernel_ops)
+    if(ENABLE_VSA_SM100_FAMILY)
+        list(APPEND COMPILE_DEFS TK_COMPILE_BLOCK_SPARSE_VSA_SM100A)
+    endif()
     if(ENABLE_TK_KERNELS)
         list(APPEND COMPILE_DEFS TK_COMPILE_ST_ATTN TK_COMPILE_BLOCK_SPARSE)
     endif()
+    if(ENABLE_ULYSSES_A2A)
+        list(APPEND COMPILE_DEFS FASTVIDEO_KERNEL_COMPILE_ULYSSES_A2A)
+    endif()
+
 
     target_compile_definitions(fastvideo_kernel_ops PRIVATE ${COMPILE_DEFS})
 
@@ -346,6 +454,9 @@ if(BUILD_CXX_KERNELS)
     # Link against Torch libraries to avoid undefined symbols at import time
     # (e.g., torch::autograd vtables) when loading the extension module.
     target_link_libraries(fastvideo_kernel_ops PRIVATE ${TORCH_LIBRARIES})
+    if(ENABLE_ULYSSES_A2A)
+        target_link_libraries(fastvideo_kernel_ops PRIVATE "${NCCL_LIBRARY}")
+    endif()
 
     # Also link against libtorch_python to satisfy Python-binding symbols
     # (e.g., torch::PyWarningHandler) required by torch/extension.h.
@@ -449,6 +560,7 @@ message(STATUS "host / backend:       ${CMAKE_SYSTEM_PROCESSOR} / ${GPU_BACKEND}
 message(STATUS "TORCH_CUDA_ARCH_LIST: ${TORCH_CUDA_ARCH_LIST}")
 message(STATUS "fastvideo_kernel_ops: ON  (turbodiffusion int8-gemm/quant/rmsnorm/layernorm, all listed archs)")
 message(STATUS "  + TK sta/block_sparse (sm_90a only):          ${ENABLE_TK_KERNELS}")
+message(STATUS "  + Ulysses NCCL-device all-to-all:             ${ENABLE_ULYSSES_A2A}")
 message(STATUS "fp4attn/fp4quant (sm_120a only, CUDA >= 12.8):  ${ENABLE_ATTN_QAT_INFER}")
 message(STATUS "Triton fallbacks ship in python/fastvideo_kernel/triton_kernels regardless.")
 message(STATUS "============================================================")

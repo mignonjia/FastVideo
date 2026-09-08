@@ -178,6 +178,22 @@ optimizations: absence means **untested**, not incompatible.
 | Matrix Game 3.0 Base Distilled | `FastVideo/Matrix-Game-3.0-Base-Distilled-Diffusers` | 720x1280 | ⭕ | ⭕ | ⭕ | ⭕ | ⭕ |
 | GEN3C Cosmos 7B | `FastVideo/GEN3C-Cosmos-7B-Diffusers` | 704px1280p | ❌ | ❌ | ❌ | ⭕ | ⭕ |
 
+## Apple Silicon native runtime
+
+| Release path | Model | Mode | Validated hardware | Status |
+| --- | --- | --- | --- | --- |
+| MLX FastMetal T2V 1.3B | [`FastVideo/FastMetal-1.3B-QAD`](https://huggingface.co/FastVideo/FastMetal-1.3B-QAD) | 480x832, 81 frames, 3-step DMD, INT8 DiT + TAEHV decode | Apple M4 Max, 16 GB+ unified memory | Released |
+| MLX FastMetal T2V 5B | [`FastVideo/FastMetal-5B-QAD`](https://huggingface.co/FastVideo/FastMetal-5B-QAD) | 480p / 720p, 81 frames, 3-step DMD, INT8 DiT + TAEHV decode; optional `--fast`, `--fast-spatial`, `--refine`. The checked-in example is T2V. CUDA Wan2.2 TI2V 5B is the image-capable path. | Apple M4 Max, 16 GB+ unified memory | Released |
+| MLX FastMetal T2V 14B | [`FastVideo/FastMetal-14B-QAD`](https://huggingface.co/FastVideo/FastMetal-14B-QAD) | 480p / 720p, 81 frames, 3-step DMD, INT8 DiT + TAEHV decode | Apple M4 Max, 36 GB+ unified memory | Released |
+| MLX FastH3 Preview T2VA | [`FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2`](https://huggingface.co/FastVideo/FastVideo-Minimax-FastH3-Preview-v0.2) + locally converted DiT | 480p / 720p, 124 frames, 4-step DMD2, INT8/INT6/INT4 **weight-only** DiT, native video + audio VAE; optional temporal RIFE fast mode; optional spatial fast mode; optional VSA (tile 64/256, exempt/compete) on `--include-vsa` checkpoints | Apple M4 Max, 36 GB unified memory | Source runtime; T2VA only |
+
+Apple Silicon uses the native MLX runtime. FastMetal-QAD is the packaged Wan
+release, while FastH3 Preview currently uses a source checkout and local DiT
+conversion. CUDA FastWan-QAD (`FastVideo/FastWan-QAD-1.3B`,
+`FastVideo/FastWan-QAD-FP8-1.3B`) is the NVIDIA release. See the
+[Apple Silicon guide](../getting_started/installation/mps.md) and the
+[FastMetal-QAD blog](https://haoailab.com/blogs/fastmetal/).
+
 **Note**: Wan2.2 TI2V 5B has some quality issues when performing I2V generation. We are working on fixing this issue.
 
 ***Lucy Edit Dev uses a non-commercial model license. FastVideo support is
@@ -205,9 +221,12 @@ Per the installation guides:
   [GPU install guide](../getting_started/installation/gpu.md).
 - **NVIDIA DGX Spark (GB10, aarch64)** — CUDA 13, from-source kernel build; see
   the [DGX Spark install guide](../getting_started/installation/spark.md).
-- **Apple silicon (MPS)** — macOS 14 or newer; see the
-  [MPS install guide](../getting_started/installation/mps.md) and
-  [`basic_mps.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_mps.py).
+  Two Sparks over QSFP use Ray sequence parallel; see
+  [Pair two NVIDIA DGX Sparks](../getting_started/installation/spark_pair.md).
+- **Apple silicon** — macOS 14 or newer; FastMetal-QAD via the MLX runtime. See the
+  [Apple Silicon guide](../getting_started/installation/mps.md). The older
+  [`basic_mps.py`](https://github.com/hao-ai-lab/FastVideo/blob/main/examples/inference/basic/basic_mps.py)
+  demo is PyTorch MPS only.
 
 Optimization-specific hardware constraints (e.g. STA requiring Hopper) are
 listed under [Special requirements](#special-requirements).

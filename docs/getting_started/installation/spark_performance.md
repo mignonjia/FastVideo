@@ -156,8 +156,31 @@ is power-cycled. To avoid it:
 
 - **Builds** (flash-attn, kernel): `nice -n 19`, `MAX_JOBS=2`, `nohup`. Never a
   bare foreground high-parallelism build.
-- Leave `*_cpu_offload` at the example defaults — "CPU" offload is the *same*
-  unified RAM on the GB10, so the win is tiling + sane resolution, not offloading.
+- FastVideo automatically disables DiT layerwise/CPU offload and encoder/VAE CPU
+  offload after each worker binds its GB10 device. Do not force those modes back
+  on: "CPU" offload uses the same unified RAM. Multi-GPU FSDP sharding remains
+  available because it partitions weights without parking them in a separate
+  host pool.
+- **MiniMax H3 / FastH3** still needs deferred loading on one GB10. The Qwen3-VL
+  conditioner is tens of gigabytes of BF16. If the DiT and VAEs load while that
+  encoder is still resident, the process is a typical `earlyoom` kill (Python is
+  preferred). On unified memory, `lazy_module_load` auto-enables and owns that
+  split (encoder, then DiT, then VAE; DiT can drop before decode). Sequential
+  load is the H3-only fallback when lazy is off; do not pass
+  `--no-lazy-module-load` here. Geometry scalars come from checkpoint
+  `config.json`, not live weights. See [Offloading](../../inference/offloading.md).
+- **FastH3 TAEH3** (`--video-decode-backend taeh3`) is an opt-in preview decoder.
+  T2VA never materializes the 9.7 GiB video VAE (DiT still loads after Qwen via
+  sequential start). On this box, alpine 768×1344×124 decoded in **2.4 s** versus
+  **68 s** for the full VAE, and one T2VA generation finished in **224 s**
+  end-to-end. Reconstruction is approximate, not lossless. FL2VA/Ref2VA still
+  need the full VAE to encode references.
+- **Two Sparks, one clip.** Sequence parallel (`sp_size=2`) over the QSFP RoCE
+  link ran one 768×1344×124 FastH3 recipe in **292 s** vs **374–393 s** on
+  one GB10, and a 345-frame (~14.4 s) clip in **587 s**. Other heights, widths,
+  and frame counts are valid. Weights stay replicated, so lazy module load
+  (auto on GB10) is still required on each box. Bring-up and knobs:
+  [Pair two NVIDIA DGX Sparks](spark_pair.md).
 
 ## Gotchas specific to the GB10
 
@@ -174,6 +197,12 @@ A few things that surprise people on this box (beyond the memory notes above):
 - **Cosmos-2.5** uses a Qwen2.5-VL text encoder; make sure you're on a FastVideo
   build recent enough to include its `transformers`-compatibility handling before
   running it.
+- **MiniMax H3 worker init can look healthy and still die on the first generate**
+  if deferred loading is off (`--no-lazy-module-load` and sequential also off)
+  and encoder, VAE, and DiT load together. On GB10 the log should show
+  `lazy_module_load owns deferral` (or, if lazy is off, sequential
+  `Released MiniMax-H3 text encoder after conditioning` before
+  `Loading MiniMax-H3 denoise modules`).
 
 ## Reproduce these numbers
 

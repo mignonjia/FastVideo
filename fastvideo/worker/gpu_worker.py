@@ -4,6 +4,7 @@ from typing import Any, cast
 
 import torch
 
+import fastvideo.envs as envs
 from fastvideo.distributed import (cleanup_dist_env_and_memory, maybe_init_distributed_environment_and_model_parallel)
 from fastvideo.distributed.parallel_state import get_local_torch_device
 from fastvideo.fastvideo_args import FastVideoArgs
@@ -11,6 +12,14 @@ from fastvideo.logger import init_logger
 from fastvideo.pipelines import ForwardBatch, LoRAPipeline, build_pipeline
 
 logger = init_logger(__name__)
+
+
+def _log_cuda_device_uuid(rank: int, device: torch.device) -> None:
+    """Record an NVIDIA worker UUID when external NVTX profiling is enabled."""
+    if not envs.FASTVIDEO_NVTX_PROFILE:
+        return
+    device_uuid = torch.cuda.get_device_properties(device).uuid
+    logger.info("Worker %d CUDA device UUID: GPU-%s", rank, device_uuid, local_main_process_only=False)
 
 
 class Worker:
@@ -47,8 +56,11 @@ class Worker:
 
         # Set environment variables BEFORE calling get_local_torch_device()
         # so that each worker uses the correct device
-        if self.fastvideo_args.distributed_executor_backend == "mp":
-            os.environ["LOCAL_RANK"] = str(self.local_rank)
+        # Both multiprocessing and Ray pass the worker-local rank explicitly.
+        # Ray deliberately excludes LOCAL_RANK from the copied driver
+        # environment and exposes all GPUs assigned to the node, so leaving an
+        # inherited or missing value here would bind every Ray actor to cuda:0.
+        os.environ["LOCAL_RANK"] = str(self.local_rank)
         os.environ["RANK"] = str(self.rank)
         os.environ["WORLD_SIZE"] = str(self.fastvideo_args.num_gpus)
 
@@ -61,9 +73,18 @@ class Worker:
         if current_platform.is_cuda_alike():
             torch.cuda.set_device(self.device)
             self.init_gpu_memory = torch.cuda.mem_get_info(self.device)[0]
+            if current_platform.is_cuda():
+                _log_cuda_device_uuid(self.rank, self.device)
         else:
             # For MPS, we can't get memory info the same way
             self.init_gpu_memory = 0
+
+        # CUDA's unified-memory classification reads runtime device
+        # properties, so make this decision only after this worker has bound
+        # its own device. The worker-local args object is what every loader and
+        # pipeline stage below will consume.
+        device_id = self.device.index if self.device.index is not None else 0
+        self.fastvideo_args.finalize_device_offload_policy(device_id)
 
         # Initialize the distributed environment.
         maybe_init_distributed_environment_and_model_parallel(self.fastvideo_args.tp_size, self.fastvideo_args.sp_size,

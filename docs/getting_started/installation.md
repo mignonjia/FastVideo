@@ -4,8 +4,9 @@
 FastVideo supports the following hardware platforms:
 
 - [NVIDIA CUDA](installation/gpu.md)
-- [NVIDIA DGX Spark / GB10 (ARM64 + CUDA 13)](installation/spark.md)
-  ([performance & tuning](installation/spark_performance.md))
+- **NVIDIA DGX Spark / GB10 (ARM64 + CUDA 13)** — [install](installation/spark.md),
+  [performance](installation/spark_performance.md),
+  [pair two Sparks](installation/spark_pair.md)
 - [Apple silicon](installation/mps.md)
 
 ## Quick Installation
@@ -65,6 +66,7 @@ uv pip install flash-attn --no-build-isolation -v
 
 ## Next Steps
 
-- [Quick Start Guide](quick_start.md) - Get started with your first video generation
+- [Quick Start](quick_start.md) - Generate your first video
+- [Inference Cookbook](../cookbook/index.md) - Choose a maintained recipe
 - [Configuration](../inference/configuration.md) - Learn about configuration options
-- [Examples](../inference/examples/examples_inference_index.md) - Explore example scripts and notebooks
+- [Examples](../inference/examples/examples_inference_index.md) - Explore scripts and notebooks
